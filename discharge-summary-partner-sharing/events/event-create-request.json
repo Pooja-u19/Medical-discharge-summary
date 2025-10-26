@@ -1,0 +1,4 @@
+{
+    "httpMethod": "POST",
+    "body": "{\"files\": [{\"contentType\": \"application/pdf\", \"size\": 204800, \"fileType\": \"other_documents\"]}"
+}

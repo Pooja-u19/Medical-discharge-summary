@@ -1,0 +1,734 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: 'Discharge Summary'
+
+Parameters:
+  ProjectName:
+    Description: Project name (e.g., discharge-summary)
+    Type: String
+    Default: discharge-summary
+
+  Environment:
+    Description: Environment (e.g., dev, prod)
+    Type: String
+    Default: dev
+
+  EnableS3Lifecycle:
+    Description: Enable S3 lifecycle policy (true/false)
+    Type: String
+    Default: "Disabled"
+    AllowedValues: ["Enabled", "Disabled"]
+
+  S3LifecycleDuration:
+    Description: Number of days to retain objects in S3 before transition
+    Type: Number
+    Default: "30"
+
+  EnableDynamoDBPITR:
+    Description: Enable DynamoDB Point-in-Time Recovery (true/false)
+    Type: String
+    Default: "false"
+    AllowedValues: [true, false]
+
+  EnableDynamoDBDeleteProtection:
+    Description: Enable DynamoDB Delete Protection (true/false). Enabling it will restrict stack deletion
+    Type: String
+    Default: "false"
+    AllowedValues: [true, false]
+
+  SNSSubscriptionEmailsAlerts:
+    Description: Comma separated email addresses to subscribe to the SNS Alerts topic
+    Type: String
+    Default: ""
+    ConstraintDescription: "Comma separated list of email addresses"
+
+  SQSMessageRetentionPeriod:
+    Description: Message retention period for SQS queues (in seconds)
+    Type: Number
+    Default: "1209600"
+
+  SQSVisibilityTimeout:
+    Description: Visibility timeout for SQS queues (in seconds)
+    Type: Number
+    Default: "300"
+
+  MaxReceiveCount:
+    Description: Max receive count before sending messages to dead-letter queue
+    Type: Number
+    Default: "5"
+  
+  RateLimit:
+    Description: "Rate limit for the API (requests per second)"
+    Type: Number
+    Default: "100"
+
+  BurstLimit:
+    Description: "Burst limit for the API (maximum requests allowed in a short period)"
+    Type: Number
+    Default: "200"
+
+  QuotaLimit:
+    Description: "Quota limit for the API (total requests allowed per month)"
+    Type: Number
+    Default: "1000"
+
+  SummaryGenerationLambdaTimeout:
+    Type: Number
+    Default: "300"
+    Description: "Timeout for the Summary Generation Lambda function in seconds."
+
+  SummaryGenerationLambdaMemory:
+    Type: Number
+    Default: "1024"
+    Description: "Memory size for the Summary Generation Lambda function in MB."
+
+  CachePolicyTTLMin:
+    Type: Number
+    Default: "0"
+    Description: "Minimum TTL (in seconds) for the CloudFront cache policy."
+
+  CachePolicyTTLDefault:
+    Type: Number
+    Default: "86400"
+    Description: "Default TTL (in seconds) for the CloudFront cache policy."
+
+  CachePolicyTTLMax:
+    Type: Number
+    Default: "31536000"
+    Description: "Maximum TTL (in seconds) for the CloudFront cache policy."
+
+  InitiateOCRFunctionBatchSize:
+    Type: Number
+    Default: "5"
+    Description: "Batch size of SQS messages to trigger Initiate OCR Function"
+
+  GenerateSummaryFunctionBatchSize:
+    Type: Number
+    Default: "5"
+    Description: "Batch size of SQS messages to trigger Generate Summary Function"
+
+  InitiateOCRFunctionLambdaTimeout:
+    Type: Number
+    Default: "60"
+    Description: "Timeout for the Initiate OCR Lambda function in seconds."
+
+
+Conditions:
+  EnableS3Lifecycle: !Equals [!Ref EnableS3Lifecycle, "Enabled"]
+  EnableDynamoDBPITR: !Equals [!Ref EnableDynamoDBPITR, "true"]
+  EnableDynamoDBDeleteProtection: !Equals [!Ref EnableDynamoDBDeleteProtection, "true"]
+  SubscribeToAlerts: !Not [!Equals [ !Ref SNSSubscriptionEmailsAlerts, "" ]]
+
+Resources:
+  DocumentsS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-${Environment}-documents-${AWS::Region}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSKey
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - PUT
+              - POST
+              - GET
+            AllowedOrigins:
+              - "*"
+            ExposedHeaders:
+              - ETag
+            MaxAge: 3000
+      LifecycleConfiguration:
+        !If
+          - EnableS3Lifecycle
+          - Rules:
+              - Id: TransitionToGlacier
+                Status: !Ref EnableS3Lifecycle
+                Transitions:
+                  - StorageClass: GLACIER
+                    TransitionInDays: !Ref S3LifecycleDuration
+          - !Ref "AWS::NoValue"
+
+
+  HostingS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-${Environment}-hosting-${AWS::Region}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KMSKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  HostingS3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref HostingS3Bucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: "s3:GetObject"
+            Resource: !Sub "arn:aws:s3:::${HostingS3Bucket}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+  
+  S3EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectName}-${Environment}-S3EventRule"
+      Description: "Triggers processing when a new object is created in the S3 bucket"
+      EventPattern:
+        source:
+          - "aws.s3"
+        detail-type:
+          - "Object Created"
+        detail:
+          bucket:
+            name:
+              - !Ref DocumentsS3Bucket
+      Targets:
+        - Arn: !GetAtt DocumentProcessingQueue.Arn
+          Id: "S3EventToSQS"
+
+  EventBridgeSQSPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref DocumentProcessingQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "events.amazonaws.com"
+            Action: "sqs:SendMessage"
+            Resource: !GetAtt DocumentProcessingQueue.Arn
+
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${ProjectName}-${Environment}-OAC"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub "${ProjectName}-${Environment}-CachePolicy"
+        DefaultTTL: !Ref CachePolicyTTLMin
+        MaxTTL: !Ref CachePolicyTTLMax
+        MinTTL: !Ref CachePolicyTTLMin
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: all
+          CookiesConfig:
+            CookieBehavior: none
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http3
+        Origins:
+          - Id: HostingS3Origin
+            DomainName: !GetAtt HostingS3Bucket.DomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !Ref CloudFrontOriginAccessControl
+        DefaultCacheBehavior:
+          TargetOriginId: HostingS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: ["GET", "HEAD"]
+          Compress: true
+          CachePolicyId: !Ref CloudFrontCachePolicy
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponsePagePath: /index.html
+            ResponseCode: 200
+            ErrorCachingMinTTL: 0
+
+  DocumentProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: !Ref SQSMessageRetentionPeriod
+      VisibilityTimeout: !Ref SQSVisibilityTimeout
+      KmsMasterKeyId: !Ref KMSKey
+      RedrivePolicy:
+          deadLetterTargetArn: !GetAtt DocumentProcessingDLQ.Arn
+          maxReceiveCount: !Ref MaxReceiveCount
+
+  DocumentProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      KmsMasterKeyId: !Ref KMSKey
+      MessageRetentionPeriod: !Ref SQSMessageRetentionPeriod
+
+  TextractResultsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      KmsMasterKeyId: !Ref KMSKey
+      MessageRetentionPeriod: !Ref SQSMessageRetentionPeriod
+      VisibilityTimeout: !Ref SQSVisibilityTimeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt TextractResultsDLQ.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref TextractResultsQueue 
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "__owner_statement"
+            Effect: "Allow"
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - "sqs:SendMessage"
+              - "sqs:ReceiveMessage"
+              - "sqs:DeleteMessage"
+              - "sqs:GetQueueAttributes"
+            Resource: !GetAtt TextractResultsQueue.Arn
+          - Sid: "__default_statement_ID1"
+            Effect: "Allow"
+            Principal:
+              Service: "sns.amazonaws.com"
+            Action: "sqs:SendMessage"
+            Resource: !GetAtt TextractResultsQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref SNSTopicTextractResults
+
+  TextractResultsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      KmsMasterKeyId: !Ref KMSKey
+      MessageRetentionPeriod: !Ref SQSMessageRetentionPeriod
+
+  RequestsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${Environment}-requests"
+      AttributeDefinitions:
+        - AttributeName: requestId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: requestId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [EnableDynamoDBPITR, true, false]
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref KMSKey
+      DeletionProtectionEnabled: !If [EnableDynamoDBDeleteProtection, true, false]
+
+  DocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${Environment}-documents"
+      AttributeDefinitions:
+        - AttributeName: documentId
+          AttributeType: S
+        - AttributeName: documentHash
+          AttributeType: S
+        - AttributeName: documentStatus
+          AttributeType: N
+        - AttributeName: requestId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: documentId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [EnableDynamoDBPITR, true, false]
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref KMSKey
+      DeletionProtectionEnabled: !If [EnableDynamoDBDeleteProtection, true, false]
+      GlobalSecondaryIndexes:
+        - IndexName: DocumentHashDocumentStatusIndex
+          KeySchema:
+            - AttributeName: documentHash
+              KeyType: HASH
+            - AttributeName: documentStatus
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+        - IndexName: RequestIdIndex
+          KeySchema:
+            - AttributeName: requestId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  SNSTopicAlerts:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-${Environment}-alerts"
+      DisplayName: Document Alerts
+      KmsMasterKeyId: !Ref KMSKey
+
+  SNSTopicTextractResults:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "AmazonTextract-${ProjectName}-${Environment}-results"
+      DisplayName: SNS Textract Results
+      KmsMasterKeyId: !Ref KMSKey
+
+  SNSopicTextractResultsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !GetAtt TextractResultsQueue.Arn
+      Protocol: sqs
+      TopicArn: !Ref SNSTopicTextractResults
+
+  SNSTopicAlertsSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: SubscribeToAlerts
+    Properties:
+      Protocol: email
+      Endpoint: !Ref SNSSubscriptionEmailsAlerts
+      TopicArn: !Ref SNSTopicAlerts
+
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Key used for encrypting sensitive data
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "Allow administration of the key"
+            Effect: "Allow"
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - "kms:*"
+            Resource: "*"
+          - Sid: "Allow Lambda functions to use the key for decryption"
+            Effect: "Allow"
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - sns.amazonaws.com
+                - sqs.amazonaws.com
+                - events.amazonaws.com
+                - cloudfront.amazonaws.com
+                - textract.amazonaws.com
+                - s3.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+              - kms:Encrypt
+            Resource: "*"
+
+  KMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-${Environment}-kms-key"
+      TargetKeyId: !Ref KMSKey
+
+
+  CreateRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/create-request.handler
+      Runtime: nodejs22.x
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !Sub "${DocumentsS3Bucket.Arn}/*"
+                - !GetAtt DocumentsS3Bucket.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource:
+                - !GetAtt RequestsTable.Arn
+        - Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: 
+              - !GetAtt KMSKey.Arn
+      Environment:  
+        Variables:
+          DOCUMENTS_S3_BUCKET: !Ref DocumentsS3Bucket
+          REQUESTS_DYNAMODB_TABLE: !Ref RequestsTable
+          KMS_KEY_ID: !GetAtt KMSKey.Arn
+      Events:
+        CreateRequestUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/v1/document/upload
+            Method: POST
+        CreateRequestUrlOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/v1/document/upload
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+
+  GetRequestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/get-request.handler
+      Runtime: nodejs22.x
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - s3:GetObject
+              Resource:
+                - !GetAtt DocumentsTable.Arn
+                - !Sub "${DocumentsTable.Arn}/index/RequestIdIndex"
+                - !GetAtt RequestsTable.Arn
+                - !Sub "${DocumentsS3Bucket.Arn}/*"
+        - Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: 
+              - !GetAtt KMSKey.Arn
+      Environment:
+        Variables:
+          DOCUMENTS_DYNAMODB_TABLE: !Ref DocumentsTable
+          DOCUMENTS_S3_BUCKET: !Ref DocumentsS3Bucket
+          REQUESTS_DYNAMODB_TABLE: !Ref RequestsTable
+      Events:
+        GetRequestUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/v1/document/request/{requestId}
+            Method: GET
+        GetRequestUrlOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /api/v1/document/request/{requestId}
+            Method: OPTIONS
+            Auth:
+              ApiKeyRequired: false
+
+  InitiateOcrFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/initiate-ocr.handler
+      Runtime: nodejs22.x
+      Timeout: !Ref InitiateOCRFunctionLambdaTimeout
+      Events:
+        SqsTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt DocumentProcessingQueue.Arn
+            BatchSize: !Ref InitiateOCRFunctionBatchSize
+            Enabled: true
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchWriteItem
+                - dynamodb:Query
+                - dynamodb:PutItem
+              Resource:
+                - !GetAtt DocumentsTable.Arn
+                - !GetAtt RequestsTable.Arn
+                - !Sub "${DocumentsTable.Arn}/index/DocumentHashDocumentStatusIndex"
+            - Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+              Resource:
+                - !GetAtt DocumentProcessingQueue.Arn
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource:
+                - !Ref SNSTopicAlerts
+                - !Ref SNSTopicTextractResults
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !Sub "${DocumentsS3Bucket.Arn}/*"
+                - !GetAtt DocumentsS3Bucket.Arn
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/TextractServiceRole"
+              Condition:
+                StringEquals:
+                  iam:PassedToService: textract.amazonaws.com
+            - Effect: Allow
+              Action:
+                - textract:StartDocumentTextDetection
+              Resource: "*"
+        - Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: 
+              - !GetAtt KMSKey.Arn
+      Environment:
+        Variables:
+          DOCUMENTS_DYNAMODB_TABLE: !Ref DocumentsTable
+          DOCUMENTS_S3_BUCKET: !Ref DocumentsS3Bucket
+          REQUESTS_DYNAMODB_TABLE: !Ref RequestsTable
+          NOTIFICATION_CHANNEL_ROLE_ARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/TextractServiceRole"
+          NOTIFICATION_CHANNEL_SNS_TOPIC_ARN: !Ref SNSTopicTextractResults
+          SNS_TOPIC_ARN: !Ref SNSTopicAlerts
+
+
+  GenerateSummaryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/handlers/generate-summary.handler
+      Runtime: nodejs22.x
+      Timeout: !Ref SummaryGenerationLambdaTimeout
+      MemorySize: !Ref SummaryGenerationLambdaMemory
+      Events:
+        SqsTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt TextractResultsQueue.Arn
+            BatchSize: !Ref GenerateSummaryFunctionBatchSize
+            Enabled: true
+      Policies:
+        - AmazonBedrockFullAccess
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:PutItem
+              Resource:
+                - !GetAtt DocumentsTable.Arn
+                - !Sub "${DocumentsTable.Arn}/index/RequestIdIndex"
+                - !GetAtt RequestsTable.Arn
+            - Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+              Resource:
+                - !GetAtt TextractResultsQueue.Arn
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource:
+                - !Ref SNSTopicAlerts
+            - Effect: Allow
+              Action:
+                - textract:GetDocumentTextDetection
+              Resource: "*"
+        - Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: 
+              - !GetAtt KMSKey.Arn
+      Environment:
+        Variables:
+          BEDROCK_MODEL_ID: "amazon.nova-lite-v1:0"
+          DOCUMENTS_S3_BUCKET: !Ref DocumentsS3Bucket
+          DOCUMENTS_DYNAMODB_TABLE: !Ref DocumentsTable
+          REQUESTS_DYNAMODB_TABLE: !Ref RequestsTable
+          SNS_TOPIC_ARN: !Ref SNSTopicAlerts
+
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Environment
+      Auth:
+        ApiKeyRequired: true
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        AllowCredentials: false
+
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: DischargeSummaryApiKey
+      Enabled: true
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: DischargeSummaryUsagePlan
+      ApiStages:
+        - ApiId: !Ref ApiGateway
+          Stage: !Ref Environment
+      Throttle:
+        RateLimit: !Ref RateLimit
+        BurstLimit: !Ref BurstLimit
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
+
+Outputs:
+  ApiGatewayURL:
+    Description: "API Gateway URL"
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com"
+
+  CloudFrontURL:
+    Description: "CloudFront URL"
+    Value: !GetAtt CloudFrontDistribution.DomainName
+
+  ApiKey:
+    Description: "API Key"
+    Value: !Ref ApiKey
+    

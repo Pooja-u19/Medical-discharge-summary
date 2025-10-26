@@ -1,0 +1,3 @@
+npm install ajv@8 ajv-keywords@5 --legacy-peer-deps
+
+ node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build

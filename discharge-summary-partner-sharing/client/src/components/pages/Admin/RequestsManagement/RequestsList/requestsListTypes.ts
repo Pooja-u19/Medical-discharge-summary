@@ -9,12 +9,20 @@ export interface RequestsListProps {
   }) => void;
 }
 
+export interface IAction {
+  type: string;
+  label: string;
+  description: string;
+  documentId?: string;
+}
+
 export interface IRequest {
   requestId: string;
   requestName: string;
   authorizationNumber?: string;
   resolutionStatus: resolutionStatus;
   documents: IDocument[];
+  actions?: IAction[];
 }
 
 export interface IDocument {

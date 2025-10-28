@@ -3,9 +3,23 @@ import { s3Service, dynamoDBService } from "../services/index.mjs";
 import { v4 as uuidv4 } from "uuid";
 import logger from "../utils/logger.mjs";
 
-const pdfFileType = "application/pdf";
-const pdfMaxSize = envHelper.getIntEnv("PDF_MAX_SIZE", 5 * 1024 * 1024);
+const allowedFileTypes = [
+  "application/pdf",
+  "image/jpeg", 
+  "image/png",
+  "image/tiff",
+  "text/plain",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+];
+const maxFileSize = envHelper.getIntEnv("MAX_FILE_SIZE", 10 * 1024 * 1024); // 10MB
 const requestsTable = envHelper.getStringEnv("REQUESTS_DYNAMODB_TABLE");
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,x-api-key,X-Amz-Security-Token',
+  'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS'
+};
 
 export const handler = async (event) => {
   logger.info("create request lambda triggered");
@@ -15,11 +29,7 @@ export const handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token',
-        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
-      },
+      headers: corsHeaders,
       body: ''
     };
   }
@@ -28,9 +38,11 @@ export const handler = async (event) => {
     const request = JSON.parse(event.body);
     if (!request || !request.files || request.files.length === 0) {
       logger.warn("at least one document is required");
-      return responseHelper.clientErrorResponse(
+      const response = responseHelper.clientErrorResponse(
         "at least one document must be uploaded"
       );
+      response.headers = { ...response.headers, ...corsHeaders };
+      return response;
     }
 
     const requiredTypes = ["other_documents"];
@@ -39,30 +51,38 @@ export const handler = async (event) => {
 
       if (!file) {
         logger.warn(`missing mandatory document type :: ${type}`);
-        return responseHelper.clientErrorResponse(
+        const response = responseHelper.clientErrorResponse(
           `missing mandatory document: ${type}`
         );
+        response.headers = { ...response.headers, ...corsHeaders };
+        return response;
       }
 
       if (!file.documentType) {
         logger.warn(`missing documentType for document :: ${type}`);
-        return responseHelper.clientErrorResponse(
+        const response = responseHelper.clientErrorResponse(
           `documentType is required for ${type}`
         );
+        response.headers = { ...response.headers, ...corsHeaders };
+        return response;
       }
 
       if (!file.contentType) {
         logger.warn(`missing contentType for document type :: ${type}`);
-        return responseHelper.clientErrorResponse(
+        const response = responseHelper.clientErrorResponse(
           `contentType is required for ${type}`
         );
+        response.headers = { ...response.headers, ...corsHeaders };
+        return response;
       }
 
       if (file.size === undefined || file.size === null) {
         logger.warn(`missing size for document type :: ${type}`);
-        return responseHelper.clientErrorResponse(
+        const response = responseHelper.clientErrorResponse(
           `size is required for ${type}`
         );
+        response.headers = { ...response.headers, ...corsHeaders };
+        return response;
       }
     }
 
@@ -73,25 +93,31 @@ export const handler = async (event) => {
       const { contentType, size, documentType } = documentFile;
 
       if (documentType === "other_documents") {
-        if (contentType !== pdfFileType) {
+        if (!allowedFileTypes.includes(contentType)) {
           logger.warn(
             `invalid file type for other_documents :: ${contentType}`
           );
-          return responseHelper.clientErrorResponse(
-            "other_documents must be a pdf file."
+          const response = responseHelper.clientErrorResponse(
+            `Invalid file type. Allowed types: ${allowedFileTypes.join(', ')}`
           );
+          response.headers = { ...response.headers, ...corsHeaders };
+          return response;
         }
-        if (size > pdfMaxSize) {
-          logger.warn("other_documents size exceeds the 5mb limit");
-          return responseHelper.clientErrorResponse(
-            "other_documents must be under 5mb."
+        if (size > maxFileSize) {
+          logger.warn(`other_documents size exceeds the ${maxFileSize / (1024 * 1024)}MB limit`);
+          const response = responseHelper.clientErrorResponse(
+            `File size must be under ${maxFileSize / (1024 * 1024)}MB.`
           );
+          response.headers = { ...response.headers, ...corsHeaders };
+          return response;
         }
       } else {
         logger.warn(`invalid document type provided :: ${documentType}`);
-        return responseHelper.clientErrorResponse(
-          "invalid document type. allowed: xray, patient_doctor_image, other_documents."
+        const response = responseHelper.clientErrorResponse(
+          "invalid document type. allowed: other_documents."
         );
+        response.headers = { ...response.headers, ...corsHeaders };
+        return response;
       }
 
       const documentId = uuidv4();
@@ -116,21 +142,26 @@ export const handler = async (event) => {
       Item: {
         requestId,
         createdAt: new Date().toISOString(),
-        status: "PENDING"
+        status: "PROCESSING"
       }
     });
 
-    return responseHelper.successResponse(
+    const response = responseHelper.successResponse(
       "documents submission requested successfully",
       {
         presignedUrls,
         requestId,
       }
     );
+    
+    response.headers = { ...response.headers, ...corsHeaders };
+    return response;
   } catch (error) {
     logger.error(`error in upload handler :: ${error.message}`);
-    return responseHelper.serverErrorResponse(
+    const response = responseHelper.serverErrorResponse(
       "an error occurred while requesting document submission"
     );
+    response.headers = { ...response.headers, ...corsHeaders };
+    return response;
   }
 };

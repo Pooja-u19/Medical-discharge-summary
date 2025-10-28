@@ -4,14 +4,14 @@ const createResponse = (statusCode, message, data = null) => {
   return {
     statusCode: statusCode,
     body: JSON.stringify({
-      message: message,
-      data: data,
+      message: message || 'Success',
+      data: data || 'null',
     }),
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+      "Access-Control-Allow-Origin": "https://d3pb4unilgexk3.cloudfront.net",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization,x-api-key",
     },
   };
 };

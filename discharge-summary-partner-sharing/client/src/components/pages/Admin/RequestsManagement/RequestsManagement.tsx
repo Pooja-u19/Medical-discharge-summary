@@ -42,7 +42,12 @@ const RequestsManagement: React.FC = () => {
             Discharge Summary
           </h1>
           <div className="flex gap-2">
-            <CommonButton label="Analyze Document" onClick={open} />
+            <CommonButton label="Analyze Documents" onClick={open} />
+            <CommonButton 
+              label="Refresh" 
+              onClick={() => requestsListRef.current?.refresh()} 
+              variant="outline"
+            />
             {/* <CommonButton label="Show Pipeline" onClick={openDiagram} />
             <CommonButton
               label="Show Architecture"
@@ -52,7 +57,7 @@ const RequestsManagement: React.FC = () => {
           <ReusableDrawer
             opened={opened}
             onClose={handleClose}
-            title={"Analyze Document"}
+            title={"Analyze Documents"}
             closeButtonProps={{
               icon: <IconX size={25} stroke={2} />,
             }}

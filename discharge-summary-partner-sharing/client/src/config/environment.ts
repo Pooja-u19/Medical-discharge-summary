@@ -5,6 +5,12 @@ export const environment = {
     indexedDBStoreName: process.env.REACT_APP_INDEXEDDB_STORE_NAME || 'requests',
     indexedDBName: process.env.REACT_APP_INDEXEDDB_NAME || 'dvs',
     indexedDBVersion: process.env.REACT_APP_INDEXEDDB_VERSION || 1,
-    apiKey: process.env.REACT_APP_API_KEY || "eS0yz4iHrMDqxrewoNrJ9RVcQHfnWvknTvIntE00"
+    apiKey: process.env.REACT_APP_API_KEY || ""
 };
-  
+
+// Debug logging for environment variables
+console.log('Environment Configuration:', {
+    apiBaseUrl: environment.apiBaseUrl,
+    apiKey: environment.apiKey ? `${environment.apiKey.substring(0, 4)}...` : 'NOT_SET',
+    production: environment.production
+});

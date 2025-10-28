@@ -1,32 +1,13 @@
 {
-  "name": "discharge-summary",
-  "description": "discharge-summary",
-  "version": "0.0.1",
-  "private": true,
+  "name": "textract-processor",
+  "version": "1.0.0",
+  "description": "Lambda function to process Textract results",
+  "main": "textract-processor-lambda.js",
   "dependencies": {
     "ajv": "^8.17.1",
     "ajv-keywords": "^5.1.0",
-    "aws-sdk": "^2.1692.0",
-    "uuid": "^11.0.5",
-    "winston": "^3.17.0"
-  },
-  "devDependencies": {
-    "aws-sdk-client-mock": "^2.0.0",
-    "jest": "^29.2.1"
-  },
-  "scripts": {
-    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js"
-  },
-  "jest": {
-    "testMatch": [
-      "**/__tests__/**/*.[jt]s?(x)",
-      "**/?(*.)+(spec|test).[jt]s?(x)",
-      "**/__tests__/**/*.mjs?(x)",
-      "**/?(*.)+(spec|test).mjs?(x)"
-    ],
-    "moduleFileExtensions": [
-      "mjs",
-      "js"
-    ]
+    "aws-sdk": "^2.1691.0",
+    "uuid": "^9.0.1",
+    "winston": "^3.11.0"
   }
 }

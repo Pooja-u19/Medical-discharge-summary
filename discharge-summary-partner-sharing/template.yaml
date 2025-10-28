@@ -187,37 +187,7 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
   
-  S3EventBridgeRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub "${ProjectName}-${Environment}-S3EventRule"
-      Description: "Triggers processing when a new object is created in the S3 bucket"
-      EventPattern:
-        source:
-          - "aws.s3"
-        detail-type:
-          - "Object Created"
-        detail:
-          bucket:
-            name:
-              - !Ref DocumentsS3Bucket
-      Targets:
-        - Arn: !GetAtt DocumentProcessingQueue.Arn
-          Id: "S3EventToSQS"
 
-  EventBridgeSQSPolicy:
-    Type: AWS::SQS::QueuePolicy
-    Properties:
-      Queues:
-        - !Ref DocumentProcessingQueue
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: "Allow"
-            Principal:
-              Service: "events.amazonaws.com"
-            Action: "sqs:SendMessage"
-            Resource: !GetAtt DocumentProcessingQueue.Arn
 
   CloudFrontOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
@@ -245,6 +215,8 @@ Resources:
             QueryStringBehavior: all
           CookiesConfig:
             CookieBehavior: none
+
+
 
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
@@ -274,21 +246,7 @@ Resources:
             ResponseCode: 200
             ErrorCachingMinTTL: 0
 
-  DocumentProcessingQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      MessageRetentionPeriod: !Ref SQSMessageRetentionPeriod
-      VisibilityTimeout: !Ref SQSVisibilityTimeout
-      KmsMasterKeyId: !Ref KMSKey
-      RedrivePolicy:
-          deadLetterTargetArn: !GetAtt DocumentProcessingDLQ.Arn
-          maxReceiveCount: !Ref MaxReceiveCount
 
-  DocumentProcessingDLQ:
-    Type: AWS::SQS::Queue
-    Properties:
-      KmsMasterKeyId: !Ref KMSKey
-      MessageRetentionPeriod: !Ref SQSMessageRetentionPeriod
 
   TextractResultsQueue:
     Type: AWS::SQS::Queue
@@ -494,21 +452,7 @@ Resources:
           DOCUMENTS_S3_BUCKET: !Ref DocumentsS3Bucket
           REQUESTS_DYNAMODB_TABLE: !Ref RequestsTable
           KMS_KEY_ID: !GetAtt KMSKey.Arn
-      Events:
-        CreateRequestUrl:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /api/v1/document/upload
-            Method: POST
-        CreateRequestUrlOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /api/v1/document/upload
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
+
 
   GetRequestFunction:
     Type: AWS::Serverless::Function
@@ -539,21 +483,10 @@ Resources:
           DOCUMENTS_DYNAMODB_TABLE: !Ref DocumentsTable
           DOCUMENTS_S3_BUCKET: !Ref DocumentsS3Bucket
           REQUESTS_DYNAMODB_TABLE: !Ref RequestsTable
-      Events:
-        GetRequestUrl:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /api/v1/document/request/{requestId}
-            Method: GET
-        GetRequestUrlOptions:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGateway
-            Path: /api/v1/document/request/{requestId}
-            Method: OPTIONS
-            Auth:
-              ApiKeyRequired: false
+
+
+
+
 
   InitiateOcrFunction:
     Type: AWS::Serverless::Function
@@ -561,13 +494,6 @@ Resources:
       Handler: src/handlers/initiate-ocr.handler
       Runtime: nodejs22.x
       Timeout: !Ref InitiateOCRFunctionLambdaTimeout
-      Events:
-        SqsTrigger:
-          Type: SQS
-          Properties:
-            Queue: !GetAtt DocumentProcessingQueue.Arn
-            BatchSize: !Ref InitiateOCRFunctionBatchSize
-            Enabled: true
       Policies:
         - Statement:
             - Effect: Allow
@@ -578,14 +504,7 @@ Resources:
               Resource:
                 - !GetAtt DocumentsTable.Arn
                 - !GetAtt RequestsTable.Arn
-                - !Sub "${DocumentsTable.Arn}/index/DocumentHashDocumentStatusIndex"
-            - Effect: Allow
-              Action:
-                - sqs:ReceiveMessage
-                - sqs:DeleteMessage
-                - sqs:GetQueueAttributes
-              Resource:
-                - !GetAtt DocumentProcessingQueue.Arn
+
             - Effect: Allow
               Action:
                 - sns:Publish
@@ -624,7 +543,6 @@ Resources:
           NOTIFICATION_CHANNEL_ROLE_ARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/TextractServiceRole"
           NOTIFICATION_CHANNEL_SNS_TOPIC_ARN: !Ref SNSTopicTextractResults
           SNS_TOPIC_ARN: !Ref SNSTopicAlerts
-
 
   GenerateSummaryFunction:
     Type: AWS::Serverless::Function
@@ -687,13 +605,95 @@ Resources:
     Type: AWS::Serverless::Api
     Properties:
       StageName: !Ref Environment
-      Auth:
-        ApiKeyRequired: true
       Cors:
-        AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowMethods: "'GET,POST,PUT,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,x-api-key'"
         AllowOrigin: "'*'"
         AllowCredentials: false
+      DefinitionBody:
+        swagger: "2.0"
+        info:
+          title: "Document Summary API"
+          version: "1.0"
+        paths:
+          /api/v1/document/upload:
+            post:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateRequestFunction.Arn}/invocations"
+              security:
+                - api_key: []
+            options:
+              responses:
+                "200":
+                  description: "200 response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+              security: []
+              x-amazon-apigateway-integration:
+                type: "mock"
+                requestTemplates:
+                  application/json: '{"statusCode": 200}'
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Origin: "'https://d3pb4unilgexk3.cloudfront.net'"
+                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key'"
+          /api/v1/document/request/{requestId}:
+            get:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetRequestFunction.Arn}/invocations"
+              security:
+                - api_key: []
+            options:
+              responses:
+                "200":
+                  description: "200 response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+              security: []
+              x-amazon-apigateway-integration:
+                type: "mock"
+                requestTemplates:
+                  application/json: '{"statusCode": 200}'
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Origin: "'https://d3pb4unilgexk3.cloudfront.net'"
+                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key'"
+        securityDefinitions:
+          api_key:
+            type: apiKey
+            name: x-api-key
+            in: header
+        x-amazon-apigateway-gateway-responses:
+          DEFAULT_4XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'https://d3pb4unilgexk3.cloudfront.net'"
+              gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,OPTIONS'"
+              gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key'"
+          DEFAULT_5XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Origin: "'https://d3pb4unilgexk3.cloudfront.net'"
+              gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,OPTIONS'"
+              gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key'"
 
   ApiKey:
     Type: AWS::ApiGateway::ApiKey
@@ -719,6 +719,51 @@ Resources:
       KeyType: API_KEY
       UsagePlanId: !Ref UsagePlan
 
+  CreateRequestFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CreateRequestFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/*"
+
+  GetRequestFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetRequestFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/*"
+
+  InitiateOcrFunctionS3Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InitiateOcrFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt S3EventRule.Arn
+
+  S3EventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Trigger InitiateOcrFunction when files are uploaded to S3"
+      EventPattern:
+        source:
+          - "aws.s3"
+        detail-type:
+          - "Object Created"
+        detail:
+          bucket:
+            name:
+              - !Ref DocumentsS3Bucket
+          object:
+            key:
+              - prefix: "input/"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InitiateOcrFunction.Arn
+          Id: "InitiateOcrFunctionTarget"
+
 Outputs:
   ApiGatewayURL:
     Description: "API Gateway URL"
@@ -729,6 +774,6 @@ Outputs:
     Value: !GetAtt CloudFrontDistribution.DomainName
 
   ApiKey:
-    Description: "API Key"
+    Description: "API Key ID"
     Value: !Ref ApiKey
     

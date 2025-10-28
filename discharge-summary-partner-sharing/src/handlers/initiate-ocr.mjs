@@ -19,28 +19,32 @@ const documentsTable = envHelper.getStringEnv("DOCUMENTS_DYNAMODB_TABLE");
 const requestsTable = envHelper.getStringEnv("REQUESTS_DYNAMODB_TABLE");
 
 export const handler = async (event) => {
-  logger.info("initiate ocr lambda triggered");
+  logger.info("initiate ocr lambda triggered by S3");
   logger.debug(`event received :: ${JSON.stringify(event)}`);
 
   try {
-    const documentsToProcess = await Promise.all(
-      event.Records.map(processDocument)
-    );
-    if (documentsToProcess.length > 0) {
-      await dynamoDBService.batchWrite({
-        TableName: documentsTable,
-        Items: documentsToProcess,
-      });
+    for (const record of event.Records) {
+      if (record.eventName && record.eventName.startsWith('ObjectCreated')) {
+        const objectKey = decodeURIComponent(record.s3.object.key);
+        logger.info(`Processing S3 object: ${objectKey}`);
+        
+        const document = await processS3Document(record);
+        if (document) {
+          await dynamoDBService.putItem({
+            TableName: documentsTable,
+            Item: document,
+          });
+        }
+      }
     }
   } catch (error) {
-    logger.error(`error processing records :: ${error.message}`);
+    logger.error(`error processing S3 records :: ${error.message}`);
     throw error;
   }
 };
 
-const processDocument = async (record) => {
-  const s3Event = JSON.parse(record.body);
-  const objectKey = s3Event.detail.object.key;
+const processS3Document = async (record) => {
+  const objectKey = decodeURIComponent(record.s3.object.key);
   let [, requestId, documentType, documentId] = objectKey.split("/");
 
   if (!isValidUUID(requestId) || !isValidUUID(documentId)) {
@@ -90,6 +94,7 @@ const processDocument = async (record) => {
         requestId: document.requestId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        status: "PROCESSING"
       },
     });
 

@@ -9,6 +9,7 @@ import {
 import logger from "../utils/logger.mjs";
 
 const documentsTable = envHelper.getStringEnv("DOCUMENTS_DYNAMODB_TABLE");
+const requestsTable = envHelper.getStringEnv("REQUESTS_DYNAMODB_TABLE");
 const modelId = envHelper.getStringEnv(
   "BEDROCK_MODEL_ID",
   "anthropic.claude-3-sonnet-20240229-v1:0"
@@ -23,8 +24,24 @@ export const handler = async (event) => {
     const message = JSON.parse(messageBody.Message);
     const textractJobId = message.JobId;
     const textractJobStatus = message.Status;
-    const document = message.DocumentLocation.S3ObjectName;
-    const [, requestId, , documentId] = document.split("/");
+    // Get document info from DynamoDB since SNS doesn't include S3 path
+    const documents = await dynamoDBService.scan({
+      TableName: documentsTable,
+      FilterExpression: "documentStatus = :pending",
+      ExpressionAttributeValues: {
+        ":pending": documentStatus.PENDING,
+      },
+      Limit: 1
+    });
+    
+    if (!documents.Items || documents.Items.length === 0) {
+      logger.warn(`No pending documents found for jobId: ${textractJobId}`);
+      return;
+    }
+    
+    const document = documents.Items[0];
+    const requestId = document.requestId;
+    const documentId = document.documentId;
     const logPrefix = `processing record :: requestId :: ${requestId} :: documentId :: ${documentId} :: jobId :: ${textractJobId} :: textractJobStatus :: ${textractJobStatus}`;
 
     try {
@@ -84,6 +101,9 @@ export const handler = async (event) => {
               pages,
               medicalInformation.data
             );
+            
+            await updateRequestStatus(requestId, "COMPLETED");
+            
             await snsService.publishToSNS(
               `Discharge Summary Generated for Request ${requestId}`,
               "Discharge Summary"
@@ -99,14 +119,16 @@ export const handler = async (event) => {
           null,
           "text extraction failed"
         );
+        await updateRequestStatus(requestId, "FAILED");
         await snsService.publishToSNS(
           `Text extraction failed for Request ${requestId}`,
-          "Discharge Summary",
+          "Discharge Summary"
         );
       }
     } catch (error) {
       logger.error(`${logPrefix} :: error :: ${error.message}`);
       await updateDocumentItem(documentId, documentStatus.ERROR, null, null, error.message);
+      await updateRequestStatus(requestId, "FAILED");
       await snsService.publishToSNS(
         `Processing failed for Request ${requestId}, ${error.message}`,
         "Discharge Summary"
@@ -261,7 +283,6 @@ const getMedicalInformation = async (pagesArray) => {
       ],
     };
 
-
     const response = await bedrockService.invokeBedrockModel(modelId, prompt);
 
     const cleanedResponse = response.trim().match(/{.*}/s);
@@ -282,6 +303,27 @@ const getMedicalInformation = async (pagesArray) => {
     return orderedResponse;
   } catch (error) {
     logger.error(`${logPrefix} :: error :: ${error.message}`);
+    throw error;
+  }
+};
+
+const updateRequestStatus = async (requestId, status) => {
+  const params = {
+    Key: { requestId },
+    TableName: requestsTable,
+    UpdateExpression: "SET #status = :status, updatedAt = :updatedAt",
+    ExpressionAttributeNames: { "#status": "status" },
+    ExpressionAttributeValues: {
+      ":status": status,
+      ":updatedAt": new Date().toISOString(),
+    },
+  };
+
+  try {
+    await dynamoDBService.updateItem(params);
+    logger.debug(`Request ${requestId} status updated to ${status}`);
+  } catch (error) {
+    logger.error(`Failed to update request ${requestId} status: ${error.message}`);
     throw error;
   }
 };

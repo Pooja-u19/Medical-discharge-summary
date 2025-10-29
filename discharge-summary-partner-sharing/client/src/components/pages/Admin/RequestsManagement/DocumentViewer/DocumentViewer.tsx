@@ -194,21 +194,33 @@ const DocumentViewer: React.FC = () => {
           </thead>
           <tbody>
             {summary.systemicExamination?.summarizedText ? (
-              JSON.parse(
-                summary.systemicExamination.summarizedText.replace(
-                  /[\x00-\x1F\x7F]/g,
-                  ""
-                )
-              ).map((item: any, index: number) => (
-                <tr key={index} className="border border-black">
-                  <td className="border border-black px-4 py-2">
-                    {item.label}
-                  </td>
-                  <td className="border border-black px-4 py-2">
-                    {item.admission}
-                  </td>
-                </tr>
-              ))
+              (() => {
+                try {
+                  return JSON.parse(
+                    summary.systemicExamination.summarizedText.replace(
+                      /[\x00-\x1F\x7F]/g,
+                      ""
+                    )
+                  ).map((item: any, index: number) => (
+                    <tr key={index} className="border border-black">
+                      <td className="border border-black px-4 py-2">
+                        {item.label}
+                      </td>
+                      <td className="border border-black px-4 py-2">
+                        {item.admission}
+                      </td>
+                    </tr>
+                  ));
+                } catch (error) {
+                  return (
+                    <tr>
+                      <td className="border border-black px-4 py-2" colSpan={2}>
+                        {summary.systemicExamination.summarizedText}
+                      </td>
+                    </tr>
+                  );
+                }
+              })()
             ) : (
               <tr>
                 <td className="border border-black px-4 py-2" colSpan={2}>
@@ -258,30 +270,42 @@ const DocumentViewer: React.FC = () => {
           </thead>
           <tbody>
             {summary.dischargeTreatment?.summarizedText ? (
-              JSON.parse(
-                summary.dischargeTreatment.summarizedText.replace(
-                  /[\x00-\x1F\x7F]/g,
-                  ""
-                )
-              ).map((drug: any, index: number) => (
-                <tr key={index} className="border border-black">
-                  <td className="border border-black px-4 py-2">
-                    {drug.drugName}
-                  </td>
-                  <td className="border border-black px-4 py-2">
-                    {drug.dosage || "-"}
-                  </td>
-                  <td className="border border-black px-4 py-2">
-                    {drug.frequency || "-"}
-                  </td>
-                  <td className="border border-black px-4 py-2">
-                    {drug.numberOfDays || "-"}
-                  </td>
-                  <td className="border border-black px-4 py-2">
-                    {drug.remark || "-"}
-                  </td>
-                </tr>
-              ))
+              (() => {
+                try {
+                  return JSON.parse(
+                    summary.dischargeTreatment.summarizedText.replace(
+                      /[\x00-\x1F\x7F]/g,
+                      ""
+                    )
+                  ).map((drug: any, index: number) => (
+                    <tr key={index} className="border border-black">
+                      <td className="border border-black px-4 py-2">
+                        {drug.drugName}
+                      </td>
+                      <td className="border border-black px-4 py-2">
+                        {drug.dosage || "-"}
+                      </td>
+                      <td className="border border-black px-4 py-2">
+                        {drug.frequency || "-"}
+                      </td>
+                      <td className="border border-black px-4 py-2">
+                        {drug.numberOfDays || "-"}
+                      </td>
+                      <td className="border border-black px-4 py-2">
+                        {drug.remark || "-"}
+                      </td>
+                    </tr>
+                  ));
+                } catch (error) {
+                  return (
+                    <tr>
+                      <td className="border border-black px-4 py-2" colSpan={5}>
+                        {summary.dischargeTreatment.summarizedText}
+                      </td>
+                    </tr>
+                  );
+                }
+              })()
             ) : (
               <tr>
                 <td

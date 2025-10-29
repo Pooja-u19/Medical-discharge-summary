@@ -26,7 +26,10 @@ const RequestsManagement: React.FC = () => {
   const handleClose = () => {
     close();
     setSelectedRequest(null);
-    requestsListRef.current?.refresh();
+    // Always refresh the list when drawer closes to show updated status
+    setTimeout(() => {
+      requestsListRef.current?.refresh();
+    }, 500); // Small delay to ensure drawer is closed
   };
 
   const handleShowMore = (request: { documents: IDocument[] }) => {

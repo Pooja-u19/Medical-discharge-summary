@@ -12,7 +12,7 @@ const documentsTable = envHelper.getStringEnv("DOCUMENTS_DYNAMODB_TABLE");
 const requestsTable = envHelper.getStringEnv("REQUESTS_DYNAMODB_TABLE");
 const modelId = envHelper.getStringEnv(
   "BEDROCK_MODEL_ID",
-  "amazon.nova-lite-v1:0"
+  "anthropic.claude-3-sonnet-20240229-v1:0"
 );
 
 export const handler = async (event) => {
@@ -20,18 +20,40 @@ export const handler = async (event) => {
   logger.debug(`event received :: ${JSON.stringify(event)}`);
 
   for (const record of event.Records) {
-    let textractJobId, textractJobStatus, requestId, documentId;
+    let textractJobId, textractJobStatus;
     
     try {
       const messageBody = JSON.parse(record.body);
       const message = JSON.parse(messageBody.Message);
       textractJobId = message.JobId;
       textractJobStatus = message.Status;
-      const document = message.DocumentLocation.S3ObjectName;
-      [, requestId, , documentId] = document.split("/");
       
-      const logPrefix = `processing record :: requestId :: ${requestId} :: documentId :: ${documentId} :: jobId :: ${textractJobId} :: textractJobStatus :: ${textractJobStatus}`;
+      logger.info(`Processing Textract job: ${textractJobId} with status: ${textractJobStatus}`);
+    } catch (parseError) {
+      logger.error(`Failed to parse SQS message: ${parseError.message}`);
+      continue;
+    }
+    // Get document info from DynamoDB using textract job ID
+    const documents = await dynamoDBService.scan({
+      TableName: documentsTable,
+      FilterExpression: "textractJobId = :jobId",
+      ExpressionAttributeValues: {
+        ":jobId": textractJobId,
+      },
+      Limit: 1
+    });
+    
+    if (!documents.Items || documents.Items.length === 0) {
+      logger.warn(`No document found for jobId: ${textractJobId}`);
+      continue;
+    }
+    
+    const document = documents.Items[0];
+    const requestId = document.requestId;
+    const documentId = document.documentId;
+    const logPrefix = `processing record :: requestId :: ${requestId} :: documentId :: ${documentId} :: jobId :: ${textractJobId} :: textractJobStatus :: ${textractJobStatus}`;
 
+    try {
       if (textractJobStatus === textractStatus.SUCCEEDED) {
         const pages = await textractService.getDocumentTextDetectionResults(
           textractJobId
@@ -52,8 +74,7 @@ export const handler = async (event) => {
             null,
             "no relevant medical information found in document"
           );
-          await updateRequestStatus(requestId, "FAILED");
-          continue;
+          return;
         }
 
         logger.debug(
@@ -62,50 +83,43 @@ export const handler = async (event) => {
           )}`
         );
 
-        // Get the specific document being processed
-        const currentDocument = await dynamoDBService.getItem({
+        const documents = await dynamoDBService.query({
           TableName: documentsTable,
-          Key: { documentId }
+          IndexName: "RequestIdIndex",
+          KeyConditionExpression: "requestId = :requestId",
+          ExpressionAttributeValues: {
+            ":requestId": requestId,
+          },
         });
 
-        if (!currentDocument.Item) {
-          logger.warn(`${logPrefix} :: current document not found`);
-          continue;
+        if (documents.Count === 0) {
+          logger.warn(`${logPrefix} :: documents not found`);
+          return;
         }
 
-        // Handle different document statuses
-        if (currentDocument.Item.documentStatus === documentStatus.SUSPICIOUS) {
-          logger.info(`${logPrefix} :: processing suspicious/duplicate document`);
-          // For duplicate documents, still generate summary but mark as resolved
-          await updateDocumentItem(
-            documentId,
-            documentStatus.LEGITIMATE,
-            pages,
-            medicalInformation.data
-          );
-          await updateRequestStatus(requestId, "COMPLETED");
-          await snsService.publishToSNS(
-            `✅ Duplicate Document Resolved & Summary Generated!\n\nRequest ID: ${requestId}\nDocument ID: ${documentId}\nStatus: Duplicate resolved and processed\nTime: ${new Date().toISOString()}`,
-            "Discharge Summary - Duplicate Resolved"
-          );
-        } else if (currentDocument.Item.documentStatus === documentStatus.PENDING) {
-          // Normal processing for pending documents
-          await updateDocumentItem(
-            documentId,
-            documentStatus.LEGITIMATE,
-            pages,
-            medicalInformation.data
-          );
-          await updateRequestStatus(requestId, "COMPLETED");
-          await snsService.publishToSNS(
-            `✅ Discharge Summary Generated Successfully!\n\nRequest ID: ${requestId}\nDocument ID: ${documentId}\nProcessing completed at: ${new Date().toISOString()}\n\nThe medical document has been processed and the discharge summary is ready for review.`,
-            "Discharge Summary - Processing Complete"
-          );
-        } else {
-          logger.info(`${logPrefix} :: document already processed with status: ${currentDocument.Item.documentStatus}`);
+        for (const document of documents.Items) {
+          if (
+            document &&
+            document.documentS3Path &&
+            medicalInformation &&
+            document.documentStatus === documentStatus.PENDING
+          ) {
+            await updateDocumentItem(
+              documentId,
+              documentStatus.LEGITIMATE,
+              pages,
+              medicalInformation.data
+            );
+            
+            await updateRequestStatus(requestId, "COMPLETED");
+            
+            await snsService.publishToSNS(
+              `Discharge Summary Generated for Request ${requestId}`,
+              "Discharge Summary"
+            );
+          }
         }
-
-      } else if (textractJobStatus === textractStatus.FAILED) {
+      } else {
         logger.warn(`${logPrefix} :: textract job failed`);
         await updateDocumentItem(
           documentId,
@@ -116,37 +130,18 @@ export const handler = async (event) => {
         );
         await updateRequestStatus(requestId, "FAILED");
         await snsService.publishToSNS(
-          `❌ Text Extraction Failed\n\nRequest ID: ${requestId}\nDocument ID: ${documentId}\nError: Textract job failed\nTime: ${new Date().toISOString()}`,
-          "Document Processing Error"
+          `Text extraction failed for Request ${requestId}`,
+          "Discharge Summary"
         );
-      } else {
-        logger.info(`${logPrefix} :: textract job status: ${textractJobStatus} - no action needed`);
       }
     } catch (error) {
-      const logPrefix = `processing error :: requestId :: ${requestId || 'unknown'} :: documentId :: ${documentId || 'unknown'}`;
       logger.error(`${logPrefix} :: error :: ${error.message}`);
-      logger.error(`Error stack: ${error.stack}`);
-      
-      // Only update if we have valid IDs
-      if (documentId) {
-        try {
-          await updateDocumentItem(documentId, documentStatus.ERROR, null, null, error.message);
-        } catch (updateError) {
-          logger.error(`Failed to update document ${documentId}: ${updateError.message}`);
-        }
-      }
-      
-      if (requestId) {
-        try {
-          await updateRequestStatus(requestId, "FAILED");
-          await snsService.publishToSNS(
-            `❌ Document Processing Error\n\nRequest ID: ${requestId}\nDocument ID: ${documentId || 'unknown'}\nError: ${error.message}\nTime: ${new Date().toISOString()}`,
-            "Document Processing Error"
-          );
-        } catch (notificationError) {
-          logger.error(`Failed to send error notification: ${notificationError.message}`);
-        }
-      }
+      await updateDocumentItem(documentId, documentStatus.ERROR, null, null, error.message);
+      await updateRequestStatus(requestId, "FAILED");
+      await snsService.publishToSNS(
+        `Processing failed for Request ${requestId}, ${error.message}`,
+        "Discharge Summary"
+      );
     }
   }
 };
@@ -158,38 +153,28 @@ const updateDocumentItem = async (
   summary = null,
   errorMessage = null
 ) => {
-  const setExpressions = [
-    "updatedAt = :updatedAt",
+  const updateExpressions = [
+    "SET updatedAt = :updatedAt",
     "documentStatus = :documentStatus",
   ];
-  const removeExpressions = [];
   const expressionAttributeValues = {
     ":updatedAt": new Date().toISOString(),
     ":documentStatus": documentStatus,
   };
 
   if (errorMessage) {
-    setExpressions.push("errorMessage = :errorMessage");
+    updateExpressions.push("errorMessage = :errorMessage");
     expressionAttributeValues[":errorMessage"] = errorMessage;
-  } else {
-    // Remove error message if document is being marked as legitimate
-    removeExpressions.push("errorMessage");
   }
 
   if (pages !== null) {
-    setExpressions.push("pages = :pages");
+    updateExpressions.push("pages = :pages");
     expressionAttributeValues[":pages"] = pages;
   }
 
   if (summary !== null) {
-    setExpressions.push("summary = :summary");
+    updateExpressions.push("summary = :summary");
     expressionAttributeValues[":summary"] = summary;
-  }
-
-  // Build the UpdateExpression
-  let updateExpression = "SET " + setExpressions.join(", ");
-  if (removeExpressions.length > 0) {
-    updateExpression += " REMOVE " + removeExpressions.join(", ");
   }
 
   const params = {
@@ -197,7 +182,7 @@ const updateDocumentItem = async (
       documentId,
     },
     TableName: documentsTable,
-    UpdateExpression: updateExpression,
+    UpdateExpression: updateExpressions.join(", "),
     ExpressionAttributeValues: expressionAttributeValues,
   };
 
@@ -207,27 +192,6 @@ const updateDocumentItem = async (
     logger.debug(`${logPrefix} :: document updated`);
   } catch (error) {
     logger.error(`${logPrefix} :: document update failed :: error :: ${error}`);
-    throw error;
-  }
-};
-
-const updateRequestStatus = async (requestId, status) => {
-  const params = {
-    Key: { requestId },
-    TableName: requestsTable,
-    UpdateExpression: "SET #status = :status, updatedAt = :updatedAt",
-    ExpressionAttributeNames: { "#status": "status" },
-    ExpressionAttributeValues: {
-      ":status": status,
-      ":updatedAt": new Date().toISOString(),
-    },
-  };
-
-  try {
-    await dynamoDBService.updateItem(params);
-    logger.info(`Request ${requestId} status updated to ${status}`);
-  } catch (error) {
-    logger.error(`Failed to update request ${requestId} status: ${error.message}`);
     throw error;
   }
 };
@@ -348,6 +312,27 @@ const getMedicalInformation = async (pagesArray) => {
     return orderedResponse;
   } catch (error) {
     logger.error(`${logPrefix} :: error :: ${error.message}`);
+    throw error;
+  }
+};
+
+const updateRequestStatus = async (requestId, status) => {
+  const params = {
+    Key: { requestId },
+    TableName: requestsTable,
+    UpdateExpression: "SET #status = :status, updatedAt = :updatedAt",
+    ExpressionAttributeNames: { "#status": "status" },
+    ExpressionAttributeValues: {
+      ":status": status,
+      ":updatedAt": new Date().toISOString(),
+    },
+  };
+
+  try {
+    await dynamoDBService.updateItem(params);
+    logger.debug(`Request ${requestId} status updated to ${status}`);
+  } catch (error) {
+    logger.error(`Failed to update request ${requestId} status: ${error.message}`);
     throw error;
   }
 };

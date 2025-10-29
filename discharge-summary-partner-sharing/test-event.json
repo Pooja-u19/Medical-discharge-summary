@@ -1,0 +1,12 @@
+{
+  "source": "aws.s3",
+  "detail-type": "Object Created",
+  "detail": {
+    "bucket": {
+      "name": "document-summary-dev-documents-us-east-1-864981715036"
+    },
+    "object": {
+      "key": "input/52d0b72d-8d8d-415c-b94c-bdddb3ebe176/other_documents/test.pdf"
+    }
+  }
+}

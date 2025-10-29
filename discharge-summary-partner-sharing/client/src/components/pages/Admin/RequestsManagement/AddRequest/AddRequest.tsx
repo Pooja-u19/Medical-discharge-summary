@@ -38,7 +38,7 @@ const AddRequest: React.FC<{
   const { log } = useLogger();
   const { showToast } = useToast();
   const [selectedFiles, setSelectedFiles] = useState<FileWithPath[]>([]);
-  const [fileStatuses, setFileStatuses] = useState<{[key: string]: 'pending' | 'uploading' | 'processing' | 'completed' | 'error'}>({});
+  const [fileStatuses, setFileStatuses] = useState<{[key: string]: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'duplicate'}>({});
   const [uploadProgress, setUploadProgress] = useState<{[key: string]: number}>({});
   const [requestId, setRequestId] = useState<string | null>(null);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
@@ -141,7 +141,7 @@ const AddRequest: React.FC<{
         
         if (response.data?.data?.documents && response.data.data.documents.length > 0) {
           const documents = response.data.data.documents;
-          const newStatuses: {[key: string]: 'pending' | 'uploading' | 'processing' | 'completed' | 'error'} = {};
+          const newStatuses: {[key: string]: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'duplicate'} = {};
           let allCompleted = true;
           
           documents.forEach((doc: any) => {
@@ -161,6 +161,9 @@ const AddRequest: React.FC<{
               case 3: // ERROR
                 newStatuses[fileName] = 'error';
                 break;
+              case 4: // DUPLICATE/FRAUD
+                newStatuses[fileName] = 'duplicate';
+                break;
               default:
                 newStatuses[fileName] = 'processing';
                 allCompleted = false;
@@ -178,11 +181,18 @@ const AddRequest: React.FC<{
             
             const completedCount = Object.values(newStatuses).filter(status => status === 'completed').length;
             const errorCount = Object.values(newStatuses).filter(status => status === 'error').length;
+            const duplicateCount = Object.values(newStatuses).filter(status => status === 'duplicate').length;
             
-            if (errorCount > 0) {
+            if (duplicateCount > 0) {
+              showToast(ToastType.ERROR, `FRAUD ALERT: ${duplicateCount} duplicate document(s) detected!`);
+            } else if (errorCount > 0) {
               showToast(ToastType.WARNING, `${completedCount} documents processed successfully, ${errorCount} failed`);
             } else {
               showToast(ToastType.SUCCESS, `All ${completedCount} documents processed successfully!`);
+              // Auto-close the drawer after successful processing
+              setTimeout(() => {
+                close();
+              }, 2000); // Close after 2 seconds to let user see the success message
             }
           }
         } else {

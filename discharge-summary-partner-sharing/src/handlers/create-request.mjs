@@ -87,6 +87,9 @@ export const handler = async (event) => {
     }
 
     const requestId = uuidv4();
+    console.log(`🔵 CREATE-REQUEST: Generated requestId = ${requestId}`);
+    logger.info(`🔵 CREATE-REQUEST: Generated requestId = ${requestId}`);
+    
     const presignedUrls = [];
 
     for (const documentFile of request.files) {
@@ -121,8 +124,15 @@ export const handler = async (event) => {
       }
 
       const documentId = uuidv4();
+      console.log(`🟢 CREATE-REQUEST: Generated documentId = ${documentId} for requestId = ${requestId}`);
+      logger.info(`🟢 CREATE-REQUEST: Generated documentId = ${documentId} for requestId = ${requestId}`);
+      
+      const s3Path = `input/${requestId}/${documentType}/${documentId}`;
+      console.log(`📁 CREATE-REQUEST: S3 path will be = ${s3Path}`);
+      logger.info(`📁 CREATE-REQUEST: S3 path will be = ${s3Path}`);
+      
       const presignedUrl = await s3Service.generatePresignedUrl(
-        `input/${requestId}/${documentType}/${documentId}`,
+        s3Path,
         3600,
         "putObject",
         contentType

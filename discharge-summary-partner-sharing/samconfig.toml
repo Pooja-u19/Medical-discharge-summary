@@ -4,11 +4,11 @@ stack_name = "document-summary"
 resolve_s3 = true
 s3_prefix = "document-summary"
 region = "us-east-1"
-confirm_changeset = true
-capabilities = "CAPABILITY_IAM"
-parameter_overrides = "ProjectName=\"document-summary\" Environment=\"dev\" EnableS3Lifecycle=\"Disabled\" S3LifecycleDuration=\"30\" EnableDynamoDBPITR=\"false\" EnableDynamoDBDeleteProtection=\"false\" SNSSubscriptionEmailsAlerts=\"\" SQSMessageRetentionPeriod=\"1209600\" SQSVisibilityTimeout=\"300\" MaxReceiveCount=\"5\" RateLimit=\"100\" BurstLimit=\"200\" QuotaLimit=\"1000\" SummaryGenerationLambdaTimeout=\"300\" SummaryGenerationLambdaMemory=\"1024\" CachePolicyTTLMin=\"0\" CachePolicyTTLDefault=\"86400\" CachePolicyTTLMax=\"31536000\" InitiateOCRFunctionBatchSize=\"5\" GenerateSummaryFunctionBatchSize=\"5\" InitiateOCRFunctionLambdaTimeout=\"60\""
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+parameter_overrides = "ProjectName=\"document-summary\" Environment=\"dev\" SNSSubscriptionEmailsAlerts=\"poojau@crimsoncloud.in\""
 image_repositories = []
-disable_rollback = true
+disable_rollback = false
 
 [default.global.parameters]
 region = "us-east-1"

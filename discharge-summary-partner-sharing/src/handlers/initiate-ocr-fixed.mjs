@@ -64,22 +64,14 @@ export const handler = async (event) => {
 
 const processS3Document = async (record) => {
   const objectKey = decodeURIComponent(record.s3.object.key);
-  console.log(`📂 INITIATE-OCR: Processing S3 object key = ${objectKey}`);
-  logger.info(`📂 INITIATE-OCR: Processing S3 object key = ${objectKey}`);
-  
   let [, requestId, documentType, documentId] = objectKey.split("/");
-  console.log(`🔍 INITIATE-OCR: Extracted from S3 path - requestId = ${requestId}, documentId = ${documentId}, documentType = ${documentType}`);
-  logger.info(`🔍 INITIATE-OCR: Extracted from S3 path - requestId = ${requestId}, documentId = ${documentId}, documentType = ${documentType}`);
 
   if (!isValidUUID(requestId) || !isValidUUID(documentId)) {
-    console.log(`⚠️ INITIATE-OCR: Invalid UUIDs detected, generating new ones`);
     logger.debug(
       `Invalid requestId or documentId: ${requestId} :: ${documentId}`
     );
     requestId = uuidv4();
     documentId = uuidv4();
-    console.log(`🆕 INITIATE-OCR: Generated new requestId = ${requestId}, documentId = ${documentId}`);
-    logger.info(`🆕 INITIATE-OCR: Generated new requestId = ${requestId}, documentId = ${documentId}`);
   }
 
   const document = {
@@ -91,9 +83,6 @@ const processS3Document = async (record) => {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  
-  console.log(`📝 INITIATE-OCR: Created document object with requestId = ${requestId}, documentId = ${documentId}`);
-  logger.info(`📝 INITIATE-OCR: Created document object with requestId = ${requestId}, documentId = ${documentId}`);
 
   const logPrefix = `Processing record :: requestId: ${requestId} :: documentType: ${documentType} :: documentId: ${documentId}`;
   try {

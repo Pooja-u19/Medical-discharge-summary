@@ -1,0 +1,177 @@
+[
+    {
+        "summary": {
+            "M": {
+                "patientName": {
+                    "M": {
+                        "summarizedText": {
+                            "S": "Ramesh Kumar"
+                        }
+                    }
+                },
+                "diagnosis": {
+                    "M": {
+                        "summarizedText": {
+                            "S": "Type II Diabetes Mellitus with Hypertension"
+                        }
+                    }
+                },
+                "gender": {
+                    "M": {
+                        "summarizedText": {
+                            "S": "Male"
+                        }
+                    }
+                },
+                "age": {
+                    "M": {
+                        "summarizedText": {
+                            "S": "45"
+                        }
+                    }
+                }
+            }
+        },
+        "documentHash": {
+            "S": "5384110715f682f62c2a25da67db378f6f42b78e0d4358954313b781d7efb26b"
+        },
+        "documentType": {
+            "S": "other_documents"
+        },
+        "documentId": {
+            "S": "ee9e5e7a-2317-465c-827f-bd2ad098b7a1"
+        },
+        "updatedAt": {
+            "S": "2025-10-29T11:30:00.000Z"
+        },
+        "documentS3Path": {
+            "S": "input/9c77a3ab-868a-465b-ab17-e1e6249c531f/other_documents/ee9e5e7a-2317-465c-827f-bd2ad098b7a1"
+        },
+        "matchedDocumentId": {
+            "S": "4a04f2d5-19a8-4073-87e1-23514792cf5b"
+        },
+        "createdAt": {
+            "S": "2025-10-29T05:42:45.676Z"
+        },
+        "documentStatus": {
+            "N": "1"
+        },
+        "pages": {
+            "L": [
+                {
+                    "S": "Duplicate document resolved - same content as original"
+                }
+            ]
+        },
+        "requestId": {
+            "S": "9c77a3ab-868a-465b-ab17-e1e6249c531f"
+        }
+    },
+    {
+        "documentStatus": {
+            "N": "1"
+        },
+        "documentId": {
+            "S": "9c77a3ab-868a-465b-ab17-e1e6249c531f"
+        },
+        "updatedAt": {
+            "S": "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+        }
+    },
+    {
+        "documentHash": {
+            "S": "5384110715f682f62c2a25da67db378f6f42b78e0d4358954313b781d7efb26b"
+        },
+        "documentType": {
+            "S": "other_documents"
+        },
+        "documentId": {
+            "S": "5a26d9e1-ace3-49f3-922e-7e07483a302d"
+        },
+        "updatedAt": {
+            "S": "2025-10-29T06:34:41.658Z"
+        },
+        "documentS3Path": {
+            "S": "input/d69399a7-5c90-4d4a-89ec-9165e68cec3f/other_documents/5a26d9e1-ace3-49f3-922e-7e07483a302d"
+        },
+        "matchedDocumentId": {
+            "S": "4a04f2d5-19a8-4073-87e1-23514792cf5b"
+        },
+        "createdAt": {
+            "S": "2025-10-29T06:34:41.658Z"
+        },
+        "errorMessage": {
+            "S": "Document already exists"
+        },
+        "documentStatus": {
+            "N": "2"
+        },
+        "requestId": {
+            "S": "d69399a7-5c90-4d4a-89ec-9165e68cec3f"
+        }
+    },
+    {
+        "textractJobId": {
+            "S": "82b81f000e801ff3d7e4f93c2e6807499e077097ad59d85b5f1156621519bdbf"
+        },
+        "documentHash": {
+            "S": "6443279acf9878d6cc2b00aed0d7ac71d21e0336ac2e98d64cf824e6a3877610"
+        },
+        "documentType": {
+            "S": "other_documents"
+        },
+        "documentId": {
+            "S": "bc5b4c97-9eeb-437e-a0da-66613ae13885"
+        },
+        "updatedAt": {
+            "S": "2025-10-29T06:08:52.750Z"
+        },
+        "documentS3Path": {
+            "S": "input/4c6b34de-179a-4ef8-aa7a-5efc81408e51/other_documents/bc5b4c97-9eeb-437e-a0da-66613ae13885"
+        },
+        "createdAt": {
+            "S": "2025-10-29T06:07:09.536Z"
+        },
+        "errorMessage": {
+            "S": "User: arn:aws:sts::864981715036:assumed-role/document-summary-GenerateSummaryFunctionRole-75brgHHJzThn/document-summary-dev-generate-summary is not authorized to perform: dynamodb:GetItem on resource: arn:aws:dynamodb:us-east-1:864981715036:table/document-summary-dev-documents because no identity-based policy allows the dynamodb:GetItem action"
+        },
+        "documentStatus": {
+            "N": "3"
+        },
+        "requestId": {
+            "S": "4c6b34de-179a-4ef8-aa7a-5efc81408e51"
+        }
+    },
+    {
+        "textractJobId": {
+            "S": "3fe63318916e85f04bf353ad42f000c9daf2c524b5f47099d640cd072b9f31db"
+        },
+        "documentHash": {
+            "S": "6443279acf9878d6cc2b00aed0d7ac71d21e0336ac2e98d64cf824e6a3877610"
+        },
+        "documentType": {
+            "S": "other_documents"
+        },
+        "documentId": {
+            "S": "e72e212e-3637-4fee-ae6f-3672b5f11789"
+        },
+        "updatedAt": {
+            "S": "2025-10-29T06:31:51.741Z"
+        },
+        "documentS3Path": {
+            "S": "input/f6e61ead-0c11-4aee-a413-97d72431d4a5/other_documents/e72e212e-3637-4fee-ae6f-3672b5f11789"
+        },
+        "createdAt": {
+            "S": "2025-10-29T06:31:32.320Z"
+        },
+        "errorMessage": {
+            "S": "Invalid UpdateExpression: Syntax error; token: \"REMOVE\", near: \", REMOVE errorMessage\""
+        },
+        "documentStatus": {
+            "N": "3"
+        },
+        "requestId": {
+            "S": "f6e61ead-0c11-4aee-a413-97d72431d4a5"
+        }
+    }
+]

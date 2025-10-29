@@ -1,0 +1,11 @@
+{
+  "name": "document-processing-lambdas",
+  "version": "1.0.0",
+  "description": "Lambda functions for document processing pipeline",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-textract": "^3.0.0",
+    "@aws-sdk/client-sns": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0"
+  }
+}

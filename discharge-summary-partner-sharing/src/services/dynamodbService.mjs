@@ -87,4 +87,15 @@ export const dynamoDBService = {
       throw error;
     }
   },
+  scan: async (params) => {
+    try {
+      logger.info(
+        `dynamoDBService :: scan :: params :: ${JSON.stringify(params)}`
+      );
+      return await dynamo.scan(params).promise();
+    } catch (error) {
+      logger.error(`dynamoDBService :: scan :: error :: ${error.message}`);
+      throw error;
+    }
+  },
 };

@@ -1,0 +1,16 @@
+{
+  "Records": [
+    {
+      "eventSource": "aws:s3",
+      "eventName": "ObjectCreated:Put",
+      "s3": {
+        "bucket": {
+          "name": "document-summary-dev-documents-us-east-1-864981715036"
+        },
+        "object": {
+          "key": "input/52d0b72d-8d8d-415c-b94c-bdddb3ebe176/other_documents/9068af23-0669-45ea-b2ab-5b1fa94d652a"
+        }
+      }
+    }
+  ]
+}

@@ -4,9 +4,9 @@ Description: 'Document Processing Pipeline - Fixed Circular Dependencies'
 
 Parameters:
   ProjectName:
-    Description: Project name (e.g., discharge-summary)
+    Description: Project name (e.g., document-summary)
     Type: String
-    Default: discharge-summary
+    Default: document-summary
 
   Environment:
     Description: Environment (e.g., dev, prod)
@@ -99,7 +99,7 @@ Resources:
   DocumentsS3Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "${ProjectName}-${Environment}-docs-${AWS::AccountId}-${AWS::Region}"
+      BucketName: !Sub "${ProjectName}-${Environment}-documents-${AWS::Region}-${AWS::AccountId}"
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -278,6 +278,8 @@ Resources:
           AttributeType: N
         - AttributeName: requestId
           AttributeType: S
+        - AttributeName: textractJobId
+          AttributeType: S
       KeySchema:
         - AttributeName: documentId
           KeyType: HASH
@@ -298,6 +300,12 @@ Resources:
         - IndexName: RequestIdIndex
           KeySchema:
             - AttributeName: requestId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: TextractJobIdIndex
+          KeySchema:
+            - AttributeName: textractJobId
               KeyType: HASH
           Projection:
             ProjectionType: ALL
@@ -491,10 +499,10 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:PutItem
                 - dynamodb:Scan
-                - dynamodb:GetItem
               Resource:
                 - !GetAtt DocumentsTable.Arn
                 - !Sub "${DocumentsTable.Arn}/index/RequestIdIndex"
+                - !Sub "${DocumentsTable.Arn}/index/TextractJobIdIndex"
                 - !GetAtt RequestsTable.Arn
             - Effect: Allow
               Action:
@@ -526,7 +534,7 @@ Resources:
           REQUESTS_DYNAMODB_TABLE: !Ref RequestsTable
           SNS_TOPIC_ARN: !Ref SNSTopicAlerts
 
-  # API Gateway with proper method definitions
+  # API Gateway (simplified, removed CloudFront circular dependency)
   ApiGateway:
     Type: AWS::Serverless::Api
     Properties:
@@ -539,65 +547,34 @@ Resources:
       DefinitionBody:
         swagger: "2.0"
         info:
-          title: "Document Summary API"
-          version: "1.0"
+          title: !Sub "${ProjectName}-${Environment}-api"
         paths:
-          /api/v1/document/upload:
+          /request:
             post:
               x-amazon-apigateway-integration:
-                type: aws_proxy
-                httpMethod: POST
                 uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateRequestFunction.Arn}/invocations"
-            options:
+                httpMethod: POST
+                type: aws_proxy
               responses:
-                "200":
-                  description: "200 response"
-                  headers:
-                    Access-Control-Allow-Origin:
-                      type: "string"
-                    Access-Control-Allow-Methods:
-                      type: "string"
-                    Access-Control-Allow-Headers:
-                      type: "string"
-              x-amazon-apigateway-integration:
-                type: "mock"
-                requestTemplates:
-                  application/json: '{"statusCode": 200}'
-                responses:
-                  default:
-                    statusCode: "200"
-                    responseParameters:
-                      method.response.header.Access-Control-Allow-Origin: "'*'"
-                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,OPTIONS'"
-                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key'"
-          /api/v1/document/request/{requestId}:
+                '200':
+                  description: Success
             get:
               x-amazon-apigateway-integration:
-                type: aws_proxy
-                httpMethod: POST
                 uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetRequestFunction.Arn}/invocations"
-            options:
+                httpMethod: POST
+                type: aws_proxy
               responses:
-                "200":
-                  description: "200 response"
-                  headers:
-                    Access-Control-Allow-Origin:
-                      type: "string"
-                    Access-Control-Allow-Methods:
-                      type: "string"
-                    Access-Control-Allow-Headers:
-                      type: "string"
+                '200':
+                  description: Success
+          /request/{requestId}:
+            get:
               x-amazon-apigateway-integration:
-                type: "mock"
-                requestTemplates:
-                  application/json: '{"statusCode": 200}'
-                responses:
-                  default:
-                    statusCode: "200"
-                    responseParameters:
-                      method.response.header.Access-Control-Allow-Origin: "'*'"
-                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,OPTIONS'"
-                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,x-api-key'"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetRequestFunction.Arn}/invocations"
+                httpMethod: POST
+                type: aws_proxy
+              responses:
+                '200':
+                  description: Success
 
   # API Gateway Lambda Permissions
   CreateRequestFunctionPermission:
@@ -616,78 +593,10 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/*"
 
-  # CloudFront for client hosting
-  ClientBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub "${ProjectName}-${Environment}-client-${AWS::AccountId}-${AWS::Region}"
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-
-  CloudFrontOriginAccessControl:
-    Type: AWS::CloudFront::OriginAccessControl
-    Properties:
-      OriginAccessControlConfig:
-        Name: !Sub "${ProjectName}-${Environment}-OAC"
-        OriginAccessControlOriginType: s3
-        SigningBehavior: always
-        SigningProtocol: sigv4
-
-  CloudFrontDistribution:
-    Type: AWS::CloudFront::Distribution
-    Properties:
-      DistributionConfig:
-        Enabled: true
-        DefaultRootObject: index.html
-        Origins:
-          - Id: ClientS3Origin
-            DomainName: !GetAtt ClientBucket.DomainName
-            S3OriginConfig: {}
-            OriginAccessControlId: !Ref CloudFrontOriginAccessControl
-        DefaultCacheBehavior:
-          TargetOriginId: ClientS3Origin
-          ViewerProtocolPolicy: redirect-to-https
-          AllowedMethods: ["GET", "HEAD"]
-          Compress: true
-          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-        CustomErrorResponses:
-          - ErrorCode: 403
-            ResponsePagePath: /index.html
-            ResponseCode: 200
-          - ErrorCode: 404
-            ResponsePagePath: /index.html
-            ResponseCode: 200
-
-  ClientBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref ClientBucket
-      PolicyDocument:
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: cloudfront.amazonaws.com
-            Action: "s3:GetObject"
-            Resource: !Sub "${ClientBucket.Arn}/*"
-            Condition:
-              StringEquals:
-                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
-
 Outputs:
   ApiGatewayURL:
     Description: "API Gateway URL"
     Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
-
-  CloudFrontURL:
-    Description: "CloudFront Distribution URL"
-    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
-
-  ClientBucketName:
-    Description: "S3 Bucket for client files"
-    Value: !Ref ClientBucket
 
   DocumentsBucketName:
     Description: "S3 Bucket for documents"

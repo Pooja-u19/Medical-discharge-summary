@@ -35,11 +35,11 @@ Parameters:
 
   SummaryGenerationLambdaTimeout:
     Type: Number
-    Default: "300"
+    Default: "180"
 
   SummaryGenerationLambdaMemory:
     Type: Number
-    Default: "1024"
+    Default: "2048"
 
   InitiateOCRFunctionBatchSize:
     Type: Number
@@ -51,7 +51,7 @@ Parameters:
 
   InitiateOCRFunctionLambdaTimeout:
     Type: Number
-    Default: "60"
+    Default: "30"
 
 Conditions:
   SubscribeToAlerts: !Not [!Equals [ !Ref SNSSubscriptionEmailsAlerts, "" ]]

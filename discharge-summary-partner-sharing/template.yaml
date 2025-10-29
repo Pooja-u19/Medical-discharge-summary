@@ -256,6 +256,8 @@ Resources:
       AttributeDefinitions:
         - AttributeName: requestId
           AttributeType: S
+        - AttributeName: patientId
+          AttributeType: S
       KeySchema:
         - AttributeName: requestId
           KeyType: HASH
@@ -264,6 +266,13 @@ Resources:
         SSEEnabled: true
         SSEType: KMS
         KMSMasterKeyId: !Ref KMSKey
+      GlobalSecondaryIndexes:
+        - IndexName: PatientIdIndex
+          KeySchema:
+            - AttributeName: patientId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
 
   DocumentsTable:
     Type: AWS::DynamoDB::Table
@@ -277,6 +286,8 @@ Resources:
         - AttributeName: documentStatus
           AttributeType: N
         - AttributeName: requestId
+          AttributeType: S
+        - AttributeName: patientId
           AttributeType: S
       KeySchema:
         - AttributeName: documentId
@@ -298,6 +309,12 @@ Resources:
         - IndexName: RequestIdIndex
           KeySchema:
             - AttributeName: requestId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: PatientIdIndex
+          KeySchema:
+            - AttributeName: patientId
               KeyType: HASH
           Projection:
             ProjectionType: ALL
@@ -419,6 +436,7 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
                 - dynamodb:Scan
+                - dynamodb:GetItem
               Resource:
                 - !GetAtt DocumentsTable.Arn
                 - !GetAtt RequestsTable.Arn
@@ -495,7 +513,9 @@ Resources:
               Resource:
                 - !GetAtt DocumentsTable.Arn
                 - !Sub "${DocumentsTable.Arn}/index/RequestIdIndex"
+                - !Sub "${DocumentsTable.Arn}/index/PatientIdIndex"
                 - !GetAtt RequestsTable.Arn
+                - !Sub "${RequestsTable.Arn}/index/PatientIdIndex"
             - Effect: Allow
               Action:
                 - sqs:ReceiveMessage

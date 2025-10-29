@@ -45,6 +45,10 @@ export const handler = async (event) => {
       return response;
     }
 
+    // Generate or use provided patient ID
+    const patientId = request.patientId || uuidv4();
+    logger.info(`Using patientId: ${patientId}`);
+
     const requiredTypes = ["other_documents"];
     for (const type of requiredTypes) {
       const file = request.files.find((f) => f.documentType === type);
@@ -146,11 +150,12 @@ export const handler = async (event) => {
       });
     }
 
-    // Save request to DynamoDB
+    // Save request to DynamoDB with patient ID
     await dynamoDBService.putItem({
       TableName: requestsTable,
       Item: {
         requestId,
+        patientId,
         createdAt: new Date().toISOString(),
         status: "PROCESSING"
       }
@@ -161,6 +166,7 @@ export const handler = async (event) => {
       {
         presignedUrls,
         requestId,
+        patientId,
       }
     );
     

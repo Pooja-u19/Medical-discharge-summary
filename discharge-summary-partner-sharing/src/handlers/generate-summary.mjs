@@ -37,32 +37,7 @@ export const handler = async (event) => {
           textractJobId
         );
 
-        const medicalInformation = await getMedicalInformation(pages);
-        if (
-          !medicalInformation?.data ||
-          Object.values(medicalInformation.data).every((value) => value.summarizedText === "")
-        ) {
-          logger.warn(
-            `${logPrefix} :: no relevant medical information found in extracted text.`
-          );
-          await updateDocumentItem(
-            documentId,
-            documentStatus.ERROR,
-            null,
-            null,
-            "no relevant medical information found in document"
-          );
-          await updateRequestStatus(requestId, "FAILED");
-          continue;
-        }
-
-        logger.debug(
-          `${logPrefix} :: medicalInformation :: ${JSON.stringify(
-            medicalInformation
-          )}`
-        );
-
-        // Get the specific document being processed
+        // Get the current document to find patient ID
         const currentDocument = await dynamoDBService.getItem({
           TableName: documentsTable,
           Key: { documentId }
@@ -73,10 +48,12 @@ export const handler = async (event) => {
           continue;
         }
 
-        // Handle different document statuses
-        if (currentDocument.Item.documentStatus === documentStatus.SUSPICIOUS) {
-          logger.info(`${logPrefix} :: processing suspicious/duplicate document`);
-          // For duplicate documents, still generate summary but mark as resolved
+        const patientId = currentDocument.Item.patientId;
+        
+        if (!patientId) {
+          logger.warn(`${logPrefix} :: document missing patientId, processing individually`);
+          // Process as individual document without patient grouping
+          const medicalInformation = await getMedicalInformation(pages);
           await updateDocumentItem(
             documentId,
             documentStatus.LEGITIMATE,
@@ -84,25 +61,75 @@ export const handler = async (event) => {
             medicalInformation.data
           );
           await updateRequestStatus(requestId, "COMPLETED");
-          await snsService.publishToSNS(
-            `✅ Duplicate Document Resolved & Summary Generated!\n\nRequest ID: ${requestId}\nDocument ID: ${documentId}\nStatus: Duplicate resolved and processed\nTime: ${new Date().toISOString()}`,
-            "Discharge Summary - Duplicate Resolved"
+          continue;
+        }
+        
+        logger.info(`${logPrefix} :: processing for patientId :: ${patientId}`);
+
+        // Store extracted text for this document
+        await updateDocumentItem(
+          documentId,
+          documentStatus.LEGITIMATE,
+          pages,
+          null // Don't generate individual summary yet
+        );
+
+        // Check if all documents for this patient are processed
+        const allPatientDocuments = await dynamoDBService.query({
+          TableName: documentsTable,
+          IndexName: "PatientIdIndex",
+          KeyConditionExpression: "patientId = :patientId",
+          ExpressionAttributeValues: {
+            ":patientId": patientId
+          }
+        });
+
+        const pendingDocuments = allPatientDocuments.Items.filter(
+          doc => doc.documentStatus === documentStatus.PENDING
+        );
+
+        if (pendingDocuments.length === 0) {
+          // All documents processed, generate combined summary
+          logger.info(`${logPrefix} :: all documents processed for patient ${patientId}, generating combined summary`);
+          
+          const processedDocuments = allPatientDocuments.Items.filter(
+            doc => doc.documentStatus === documentStatus.LEGITIMATE && doc.pages
           );
-        } else if (currentDocument.Item.documentStatus === documentStatus.PENDING) {
-          // Normal processing for pending documents
-          await updateDocumentItem(
-            documentId,
-            documentStatus.LEGITIMATE,
-            pages,
-            medicalInformation.data
-          );
-          await updateRequestStatus(requestId, "COMPLETED");
-          await snsService.publishToSNS(
-            `✅ Discharge Summary Generated Successfully!\n\nRequest ID: ${requestId}\nDocument ID: ${documentId}\nProcessing completed at: ${new Date().toISOString()}\n\nThe medical document has been processed and the discharge summary is ready for review.`,
-            "Discharge Summary - Processing Complete"
-          );
+
+          if (processedDocuments.length > 0) {
+            const combinedSummary = await generateCombinedPatientSummary(processedDocuments);
+            
+            // Update all documents with the combined summary
+            for (const doc of processedDocuments) {
+              await updateDocumentItem(
+                doc.documentId,
+                documentStatus.LEGITIMATE,
+                doc.pages,
+                combinedSummary.data
+              );
+            }
+
+            // Update all requests for this patient
+            const patientRequests = await dynamoDBService.query({
+              TableName: requestsTable,
+              IndexName: "PatientIdIndex",
+              KeyConditionExpression: "patientId = :patientId",
+              ExpressionAttributeValues: {
+                ":patientId": patientId
+              }
+            });
+
+            for (const request of patientRequests.Items) {
+              await updateRequestStatus(request.requestId, "COMPLETED");
+            }
+
+            await snsService.publishToSNS(
+              `✅ Combined Patient Summary Generated!\n\nPatient ID: ${patientId}\nDocuments Processed: ${processedDocuments.length}\nProcessing completed at: ${new Date().toISOString()}\n\nAll medical documents for this patient have been analyzed and a comprehensive summary is ready.`,
+              "Patient Summary - Processing Complete"
+            );
+          }
         } else {
-          logger.info(`${logPrefix} :: document already processed with status: ${currentDocument.Item.documentStatus}`);
+          logger.info(`${logPrefix} :: waiting for ${pendingDocuments.length} more documents to complete for patient ${patientId}`);
         }
 
       } else if (textractJobStatus === textractStatus.FAILED) {
@@ -127,7 +154,6 @@ export const handler = async (event) => {
       logger.error(`${logPrefix} :: error :: ${error.message}`);
       logger.error(`Error stack: ${error.stack}`);
       
-      // Only update if we have valid IDs
       if (documentId) {
         try {
           await updateDocumentItem(documentId, documentStatus.ERROR, null, null, error.message);
@@ -187,19 +213,25 @@ const updateDocumentItem = async (
   }
 
   // Build the UpdateExpression
-  let updateExpression = "SET " + setExpressions.join(", ");
-  if (removeExpressions.length > 0) {
-    updateExpression += " REMOVE " + removeExpressions.join(", ");
-  }
-
+  let updateExpression = "";
   const params = {
     Key: {
       documentId,
     },
     TableName: documentsTable,
-    UpdateExpression: updateExpression,
-    ExpressionAttributeValues: expressionAttributeValues,
   };
+
+  if (setExpressions.length > 0) {
+    updateExpression += "SET " + setExpressions.join(", ");
+    params.ExpressionAttributeValues = expressionAttributeValues;
+  }
+  
+  if (removeExpressions.length > 0) {
+    if (updateExpression) updateExpression += " ";
+    updateExpression += "REMOVE " + removeExpressions.join(", ");
+  }
+
+  params.UpdateExpression = updateExpression;
 
   const logPrefix = `updating item :: documentId :: ${documentId} :: documentStatus :: ${documentStatus}`;
   try {
@@ -228,6 +260,29 @@ const updateRequestStatus = async (requestId, status) => {
     logger.info(`Request ${requestId} status updated to ${status}`);
   } catch (error) {
     logger.error(`Failed to update request ${requestId} status: ${error.message}`);
+    throw error;
+  }
+};
+
+const generateCombinedPatientSummary = async (documents) => {
+  const logPrefix = `generateCombinedPatientSummary`;
+  try {
+    // Combine all pages from all documents
+    const allPages = [];
+    documents.forEach((doc, docIndex) => {
+      if (doc.pages && doc.pages.length > 0) {
+        doc.pages.forEach((page, pageIndex) => {
+          allPages.push(`Document ${docIndex + 1}, Page ${pageIndex + 1}: ${page}`);
+        });
+      }
+    });
+
+    const combinedText = allPages.join("\n\n");
+    logger.info(`${logPrefix} :: processing ${documents.length} documents with ${allPages.length} total pages`);
+
+    return await getMedicalInformation([combinedText]);
+  } catch (error) {
+    logger.error(`${logPrefix} :: error :: ${error.message}`);
     throw error;
   }
 };
@@ -275,13 +330,15 @@ const getMedicalInformation = async (pagesArray) => {
     from the provided medical text.
     
     **Instructions:**  
-    - The input is an **array of pages** (medical documents).  
+    - The input contains **multiple medical documents for the same patient**.  
+    - **COMBINE and CONSOLIDATE** information from all documents to create a comprehensive patient summary.  
     - Extract **all necessary fields** related to a discharge summary.  
     - Field names must be in **camelCase** format and enclosed in **brackets [ ]**.  
     - Every field must be returned as an object with a \`summarizedText\` key, e.g., \`"age": { "summarizedText": "45" }\`.  
     - If a field is missing, return an **empty string** ("") or \`0\` for numbers.  
-    - **Do NOT include field names or labels in extracted values.**  
-    - If a field has multiple values, separate them using **\\n** (newline).  
+    - **MERGE findings from multiple documents** - combine diagnoses, treatments, observations.  
+    - **Chronologically order** events when multiple dates are present.  
+    - **Consolidate medications** from all documents, removing duplicates.  
     - **Ensure extracted fields follow this exact order:**  
     ${requiredFields
                   .map((field, i) => `${i + 1}. [${field}]`)

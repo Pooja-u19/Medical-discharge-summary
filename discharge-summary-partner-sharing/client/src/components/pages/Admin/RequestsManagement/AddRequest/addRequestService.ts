@@ -8,6 +8,7 @@ const addRequestService = {
       documentType: string;
       fileName?: string;
     }[];
+    patientId?: string;
   }): Promise<ApiResponse<any>> => {
     return await post("/api/v1/document/upload", body);
   },

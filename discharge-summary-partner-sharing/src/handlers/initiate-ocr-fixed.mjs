@@ -74,9 +74,23 @@ const processS3Document = async (record) => {
     documentId = uuidv4();
   }
 
+  // Get patient ID from request
+  let patientId = null;
+  try {
+    const requestData = await dynamoDBService.getItem({
+      TableName: requestsTable,
+      Key: { requestId }
+    });
+    patientId = requestData.Item?.patientId || uuidv4();
+  } catch (error) {
+    logger.warn(`Could not retrieve patientId for requestId ${requestId}, generating new one`);
+    patientId = uuidv4();
+  }
+
   const document = {
     documentId,
     requestId,
+    patientId,
     documentStatus: documentStatus.PENDING,
     documentS3Path: objectKey,
     documentType,
@@ -109,10 +123,11 @@ const processS3Document = async (record) => {
       );
     }
 
-    // Check for duplicate documents
-    const existingDocuments = await dynamoDBService.scan({
+    // Check for duplicate documents using GSI for better performance
+    const existingDocuments = await dynamoDBService.query({
       TableName: documentsTable,
-      FilterExpression: "documentHash = :hash",
+      IndexName: "DocumentHashDocumentStatusIndex",
+      KeyConditionExpression: "documentHash = :hash",
       ExpressionAttributeValues: {
         ":hash": documentHash,
       },
@@ -123,11 +138,12 @@ const processS3Document = async (record) => {
       return await handleDuplicateDocument(document, existingDocuments.Items[0]);
     }
 
-    // Create or update request record
+    // Create or update request record with patient ID
     await dynamoDBService.putItem({
       TableName: requestsTable,
       Item: {
         requestId: document.requestId,
+        patientId: document.patientId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         status: "PROCESSING"
@@ -163,26 +179,33 @@ const handleInvalidFile = (document, errorMessage) => {
 };
 
 const handleDuplicateDocument = async (document, existingDocument) => {
-  logger.warn(
-    `Duplicate document detected - hash already exists for document ${existingDocument.documentId}`
+  logger.info(
+    `Duplicate document detected - reusing existing document ${existingDocument.documentId}`
   );
-  document.documentStatus = documentStatus.SUSPICIOUS;
-  document.errorMessage =
-    existingDocument.documentStatus === documentStatus.SUSPICIOUS
-      ? existingDocument.errorMessage || "Document already exists"
-      : "Document already exists";
+  
+  // Always reuse existing document data - no fraud alerts for legitimate reuse
+  document.documentStatus = documentStatus.LEGITIMATE;
+  document.textractJobId = existingDocument.textractJobId;
+  document.extractedText = existingDocument.extractedText;
+  document.summary = existingDocument.summary;
+  document.pages = existingDocument.pages;
   document.matchedDocumentId = existingDocument.documentId;
-
-  try {
-    await snsService.publishToSNS(
-      `FRAUD ALERT: Document with ID '${document.documentId}' under request ID '${document.requestId}' has been flagged as fraudulent. It exactly matches document ID '${document.matchedDocumentId}'. Please review immediately.`,
-      "Fraud Detection Alert"
-    );
-    logger.info(`Fraud alert sent for duplicate document ${document.documentId}`);
-  } catch (snsError) {
-    logger.error(`Failed to send fraud alert: ${snsError.message}`);
-  }
-
+  document.reuseExisting = true;
+  
+  logger.info(`Reusing existing document ${existingDocument.documentId} for new request ${document.requestId}`);
+  
+  // Update request status to completed since we're reusing existing data
+  await dynamoDBService.putItem({
+    TableName: requestsTable,
+    Item: {
+      requestId: document.requestId,
+      patientId: document.patientId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      status: "COMPLETED"
+    },
+  });
+  
   return document;
 };
 

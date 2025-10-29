@@ -38,7 +38,7 @@ const AddRequest: React.FC<{
   const { log } = useLogger();
   const { showToast } = useToast();
   const [selectedFiles, setSelectedFiles] = useState<FileWithPath[]>([]);
-  const [fileStatuses, setFileStatuses] = useState<{[key: string]: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'duplicate'}>({});
+  const [fileStatuses, setFileStatuses] = useState<{[key: string]: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'duplicate' | 'reused'}>({});
   const [uploadProgress, setUploadProgress] = useState<{[key: string]: number}>({});
   const [requestId, setRequestId] = useState<string | null>(null);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
@@ -50,6 +50,7 @@ const AddRequest: React.FC<{
   const form = useForm({
     initialValues: {
       requestName: "",
+      patientId: "",
     },
   });
   const [showJson, setShowJson] = useState(false);
@@ -141,7 +142,7 @@ const AddRequest: React.FC<{
         
         if (response.data?.data?.documents && response.data.data.documents.length > 0) {
           const documents = response.data.data.documents;
-          const newStatuses: {[key: string]: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'duplicate'} = {};
+          const newStatuses: {[key: string]: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'duplicate' | 'reused'} = {};
           let allCompleted = true;
           
           documents.forEach((doc: any) => {
@@ -153,16 +154,18 @@ const AddRequest: React.FC<{
                 allCompleted = false;
                 break;
               case 1: // LEGITIMATE
-                newStatuses[fileName] = 'completed';
+                // Check if this is a reused document
+                if (doc.reuseExisting) {
+                  newStatuses[fileName] = 'reused';
+                } else {
+                  newStatuses[fileName] = 'completed';
+                }
                 break;
-              case 2: // SUSPICIOUS
-                newStatuses[fileName] = 'completed';
+              case 2: // SUSPICIOUS - treat as reused since we fixed the backend
+                newStatuses[fileName] = 'reused';
                 break;
               case 3: // ERROR
                 newStatuses[fileName] = 'error';
-                break;
-              case 4: // DUPLICATE/FRAUD
-                newStatuses[fileName] = 'duplicate';
                 break;
               default:
                 newStatuses[fileName] = 'processing';
@@ -180,15 +183,22 @@ const AddRequest: React.FC<{
             }
             
             const completedCount = Object.values(newStatuses).filter(status => status === 'completed').length;
+            const reusedCount = Object.values(newStatuses).filter(status => status === 'reused').length;
             const errorCount = Object.values(newStatuses).filter(status => status === 'error').length;
             const duplicateCount = Object.values(newStatuses).filter(status => status === 'duplicate').length;
             
             if (duplicateCount > 0) {
               showToast(ToastType.ERROR, `FRAUD ALERT: ${duplicateCount} duplicate document(s) detected!`);
             } else if (errorCount > 0) {
-              showToast(ToastType.WARNING, `${completedCount} documents processed successfully, ${errorCount} failed`);
+              const totalSuccess = completedCount + reusedCount;
+              showToast(ToastType.WARNING, `${totalSuccess} documents processed successfully, ${errorCount} failed`);
             } else {
-              showToast(ToastType.SUCCESS, `All ${completedCount} documents processed successfully!`);
+              const totalSuccess = completedCount + reusedCount;
+              if (reusedCount > 0) {
+                showToast(ToastType.SUCCESS, `${totalSuccess} documents processed successfully! (${reusedCount} reused from previous uploads)`);
+              } else {
+                showToast(ToastType.SUCCESS, `All ${totalSuccess} documents processed successfully!`);
+              }
               // Auto-close the drawer after successful processing
               setTimeout(() => {
                 close();
@@ -209,7 +219,7 @@ const AddRequest: React.FC<{
     setPollingInterval(interval);
   };
 
-  const handleSubmit = async (values: { requestName: string }) => {
+  const handleSubmit = async (values: { requestName: string; patientId?: string }) => {
     if (selectedFiles.length === 0) {
       showToast(ToastType.ERROR, "Please upload at least one document");
       return;
@@ -236,6 +246,7 @@ const AddRequest: React.FC<{
 
       const response = await addRequestService.addRequest({
         files: filesToUpload,
+        patientId: values.patientId || undefined, // Optional patient ID
       });
 
       if (response && response.data && response.data.data) {

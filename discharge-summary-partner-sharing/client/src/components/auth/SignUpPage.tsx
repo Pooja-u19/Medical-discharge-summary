@@ -68,7 +68,7 @@ const SignUpPage = () => {
       setErrors({});
       
       // AWS Cognito sign up
-      const result = await signUp({
+      await signUp({
         username: formData.email.trim(),
         password: formData.password,
         options: {

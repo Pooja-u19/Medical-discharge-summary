@@ -23,7 +23,7 @@ const RequestsList = forwardRef<{ refresh: () => void }, RequestsListProps>(
     const { log } = useLogger();
     const navigate = useNavigate();
     const autoRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
-    const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
+    const AUTO_REFRESH_INTERVAL = 5000; // 5 seconds
 
     const determineResolutionStatus = useCallback((documents: any[]) => {
       const statuses = documents.map((doc) => doc.documentStatus);
@@ -102,16 +102,15 @@ const RequestsList = forwardRef<{ refresh: () => void }, RequestsListProps>(
 
         log(LogLevel.INFO, "RequestsList :: IndexedDB result", result);
 
-        const updatedRequests: IRequest[] = [];
-
-        for (const requestItem of result?.data || []) {
+        // Process requests in parallel for better performance
+        const requestPromises = (result?.data || []).map(async (requestItem) => {
           try {
             log(LogLevel.INFO, `RequestsList :: Fetching API data for request ${requestItem.requestId}`);
             const requestData = await requestsListService.getRequest(
               requestItem.requestId
             );
             if (requestData.data?.data) {
-              updatedRequests.push({
+              return {
                 ...requestItem,
                 documents: requestData.data.data.documents,
                 authorizationNumber:
@@ -120,13 +119,14 @@ const RequestsList = forwardRef<{ refresh: () => void }, RequestsListProps>(
                   requestData.data.data.documents
                 ),
                 actions: requestData.data.data.request?.actions || [],
-              });
+              };
             } else {
               log(
                 LogLevel.ERROR,
                 `Failed to fetch request ${requestItem.requestId}`,
                 requestData
               );
+              return null;
             }
           } catch (apiError) {
             log(
@@ -134,8 +134,11 @@ const RequestsList = forwardRef<{ refresh: () => void }, RequestsListProps>(
               `Failed to fetch request ${requestItem.requestId}`,
               apiError
             );
+            return null;
           }
-        }
+        });
+
+        const updatedRequests = (await Promise.all(requestPromises)).filter(Boolean) as IRequest[];
 
         log(LogLevel.INFO, "RequestsList :: Final updated requests", updatedRequests);
 

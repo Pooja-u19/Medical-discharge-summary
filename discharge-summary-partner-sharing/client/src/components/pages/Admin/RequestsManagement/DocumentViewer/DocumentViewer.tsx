@@ -111,7 +111,7 @@ const DocumentViewer: React.FC = () => {
   return (
     <div className="min-h-screen p-4">
       <div className="flex justify-between mb-4">
-        <Button onClick={() => navigate("/")} variant="outline">
+        <Button onClick={() => navigate("/admin")} variant="outline">
           ← Back
         </Button>
         <div className="flex gap-2">

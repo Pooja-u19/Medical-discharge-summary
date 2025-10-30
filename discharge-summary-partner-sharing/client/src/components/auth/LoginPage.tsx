@@ -48,7 +48,7 @@ const LoginPage = () => {
 
       
       // AWS Cognito authentication
-      const result = await signIn({
+      await signIn({
         username: email,
         password: password
       });

@@ -12,7 +12,7 @@ const WelcomePage = () => {
       cta: 'Learn More'
     },
     {
-      url: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1f?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
+      url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
       title: 'Expert Medical Team',
       description: 'Highly qualified specialists dedicated to providing exceptional patient care.',
       cta: 'Meet Our Doctors'
@@ -22,6 +22,12 @@ const WelcomePage = () => {
       title: 'Digital Health Solutions',
       description: 'Streamlined discharge summaries and digital health records for better patient outcomes.',
       cta: 'Get Started'
+    },
+    {
+      url: 'https://images.unsplash.com/photo-1612349317150-e413f6a5b16d?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
+      title: 'Collaborative Healthcare',
+      description: 'Our multidisciplinary team works together to ensure comprehensive patient care.',
+      cta: 'Learn More'
     }
   ]);
 
@@ -69,7 +75,7 @@ const WelcomePage = () => {
           <div className="text-center">
             <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 overflow-hidden">
               <img 
-                src="https://images.unsplash.com/photo-1559839734-2b71ea197ec2?ixlib=rb-4.0.3&auto=format&fit=crop&w=64&h=64&q=80" 
+                src="https://images.unsplash.com/photo-1582750433449-648ed127bb54?ixlib=rb-4.0.3&auto=format&fit=crop&w=64&h=64&q=80" 
                 alt="Medical Team" 
                 className="w-full h-full object-cover"
               />
@@ -143,8 +149,8 @@ const WelcomePage = () => {
             <div className="relative">
               <div className="rounded-2xl overflow-hidden shadow-2xl">
                 <img 
-                  src="https://images.unsplash.com/photo-1551190822-a9333d879b1f?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80"
-                  alt="MedCare Hospital building"
+                  src="https://images.unsplash.com/photo-1576091160550-2173dba999ef?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80"
+                  alt="Medical professionals collaborating"
                   className="w-full h-full object-cover"
                 />
               </div>

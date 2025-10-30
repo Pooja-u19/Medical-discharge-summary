@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { getCurrentUser } from 'aws-amplify/auth';
 import '../../config/amplify';
 
 interface ProtectedRouteProps {

@@ -49,7 +49,6 @@ const RequestsManagement: React.FC = () => {
             <CommonButton 
               label="Refresh" 
               onClick={() => requestsListRef.current?.refresh()} 
-              variant="outline"
             />
             {/* <CommonButton label="Show Pipeline" onClick={openDiagram} />
             <CommonButton

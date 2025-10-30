@@ -10,10 +10,10 @@ interface CommonButtonProps extends MantineButtonProps {
 
 const CommonButton: React.FC<CommonButtonProps> = ({
   label,
-  color = "#F6BE13",
+  color = "#2563eb",
   variant = "filled",
   type = "button",
-  textColor = "#000",
+  textColor = "#fff",
   onClick,
   ...rest
 }) => {

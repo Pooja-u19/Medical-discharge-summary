@@ -24,6 +24,7 @@
     "ajv": "^8.17.1",
     "ajv-keywords": "^5.1.0",
     "aos": "^3.0.0-beta.6",
+    "aws-amplify": "^6.15.7",
     "axios": "^1.7.5",
     "env-cmd": "^10.1.0",
     "html2canvas": "^1.4.1",

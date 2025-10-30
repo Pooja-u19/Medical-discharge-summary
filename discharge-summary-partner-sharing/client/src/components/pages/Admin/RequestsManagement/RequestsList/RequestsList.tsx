@@ -213,7 +213,7 @@ const RequestsList = forwardRef<{ refresh: () => void }, RequestsListProps>(
         return;
       }
       
-      navigate("/document", {
+      navigate("/admin/document", {
         state: {
           pages: document.pages || [],
           summary: document.summary || null,

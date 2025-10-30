@@ -17,6 +17,10 @@ const RequestsManagement = lazy(
 const DocumentViewer = lazy(
   () => import("./components/pages/Admin/RequestsManagement/DocumentViewer/DocumentViewer")
 );
+const WelcomePage = lazy(() => import("./components/auth/WelcomePage"));
+const LoginPage = lazy(() => import("./components/auth/LoginPage"));
+const SignUpPage = lazy(() => import("./components/auth/SignUpPage"));
+const ProtectedRoute = lazy(() => import("./components/auth/ProtectedRoute"));
 
 const App = () => {
   const { showLoader, hideLoader } = useLoader();
@@ -40,17 +44,36 @@ const App = () => {
 
   return (
     <Suspense fallback={<LoadingFallback />}>
-      <Header />
-      <div className="flex flex-col md:flex-row w-full justify-center">
-        <main
-          className={`w-full h-screen md:w-[80%] sm:w-[100%] xs:w-[100%] pt-16 sm:pt-16 md:pt-14 lg:pt-20 px-2 lg:px-4 justify-center`}
-        >
-          <Routes>
-            <Route path="/document" element={<DocumentViewer />} />
-            <Route path="/" element={<RequestsManagement />} />
-          </Routes>
-        </main>
-      </div>
+      <Routes>
+        <Route path="/welcome" element={<WelcomePage />} />
+        <Route path="/" element={<WelcomePage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignUpPage />} />
+        <Route path="/admin" element={
+          <ProtectedRoute>
+            <Header />
+            <div className="flex flex-col md:flex-row w-full justify-center">
+              <main
+                className={`w-full h-screen md:w-[80%] sm:w-[100%] xs:w-[100%] pt-16 sm:pt-16 md:pt-14 lg:pt-20 px-2 lg:px-4 justify-center`}
+              >
+                <RequestsManagement />
+              </main>
+            </div>
+          </ProtectedRoute>
+        } />
+        <Route path="/admin/document" element={
+          <ProtectedRoute>
+            <Header />
+            <div className="flex flex-col md:flex-row w-full justify-center">
+              <main
+                className={`w-full h-screen md:w-[80%] sm:w-[100%] xs:w-[100%] pt-16 sm:pt-16 md:pt-14 lg:pt-20 px-2 lg:px-4 justify-center`}
+              >
+                <DocumentViewer />
+              </main>
+            </div>
+          </ProtectedRoute>
+        } />
+      </Routes>
     </Suspense>
   );
 };
